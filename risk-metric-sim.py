@@ -225,6 +225,87 @@ def plot_encounter(ownship, targetship, metrics, savepath="risk_metrics.png"):
     return fig
 
 
+def plot_minkowski_vo(ownship, targetship, metrics, savepath="risk_metrics_minkowski.png"):
+    """Minkowski-sum point-of-view of the velocity obstacle.
+
+    The two finite-radius vessels are reduced to a single point (own ship at
+    the origin) and a disc of the *combined* safety radius R = r_own + r_tgt
+    centred at the relative position p = p_T - p_O (the Minkowski sum of the
+    two ship discs). The collision cone is the set of relative velocities that
+    point into this disc; its boundary is exactly the pair of lines through the
+    origin that are *tangent* to the disc. Translating the cone by the target
+    velocity v_T gives the velocity obstacle.
+    """
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 11,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "axes.axisbelow": True,
+        "figure.dpi": 150,
+    })
+
+    p = metrics.relpos                       # relative position (disc centre)
+    R = metrics.safety_radius                # combined / Minkowski radius
+    dist = float(np.linalg.norm(p))
+    vo = metrics.VO()
+    risk = vo["collision"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 7.5))
+
+    c_own, c_tgt = "#1f77b4", "#d62728"
+    cone_color = "#d62728" if risk else "#2ca02c"
+
+    # ---- Minkowski safety disc at the relative position --------------------
+    ax.add_patch(Circle(p, R, fc=cone_color, ec=cone_color, alpha=0.12, lw=1.6))
+    ax.plot(*p, "o", color=c_tgt, ms=8, zorder=5)
+
+    # ---- Tangent lines from the origin to the disc -------------------------
+    if dist > R:
+        axis = p / dist
+        half = np.arcsin(R / dist)               # cone half-angle
+        # Length of each tangent segment (origin -> tangent point).
+        Lt = np.sqrt(dist**2 - R**2)
+
+        def rotate(v, a):
+            c, s = np.cos(a), np.sin(a)
+            return np.array([c * v[0] - s * v[1], s * v[0] + c * v[1]])
+
+        # Shade the collision cone out a bit beyond the tangent points.
+        Lcone = dist + R
+        e1, e2 = rotate(axis, half), rotate(axis, -half)
+        cone = Polygon([[0, 0], e1 * Lcone, e2 * Lcone],
+                       closed=True, fc=cone_color, ec="none", alpha=0.08)
+        ax.add_patch(cone)
+
+        for e in (e1, e2):
+            # Tangent point lies at distance Lt along the tangent direction.
+            tp = e * Lt
+            ax.plot([0, tp[0]], [0, tp[1]], "-", color=cone_color, lw=1.6)
+            ax.plot(*tp, "o", color=cone_color, mfc="white", ms=6, zorder=6)
+
+        # Line of sight (own -> target).
+        ax.plot([0, p[0]], [0, p[1]], ":", color="k", lw=1.0, alpha=0.7)
+
+    # ---- Relative velocity vector (v_O - v_T) ------------------------------
+    vr = ownship.vel - targetship.vel
+    ax.annotate("", xy=vr * 10, xytext=(0, 0),
+                arrowprops=dict(arrowstyle="-|>", color=c_own, lw=2.2))
+
+    ax.plot(0, 0, "o", color=c_own, ms=10, zorder=7)
+
+    ax.set_title("Velocity Obstacle — Minkowski-Sum Construction", fontsize=13)
+    ax.set_xlabel("East  [m]")
+    ax.set_ylabel("North  [m]")
+    ax.set_aspect("equal", adjustable="datalim")
+
+    fig.tight_layout()
+    fig.savefig(savepath, bbox_inches="tight")
+    print(f"Saved figure to {savepath}")
+    return fig
+
+
 def plot_metric_landscape(scenarios=None, savepath="risk_metric_landscape.png"):
     """Scenario-independent view of DCPA/TCPA as functions of the encounter
     angle theta (angle between relative velocity and line of sight).
@@ -303,8 +384,8 @@ def plot_metric_landscape(scenarios=None, savepath="risk_metric_landscape.png"):
 
 
 if __name__ == "__main__":
-    ownship = Ship([0, 0], [5, 0], radius=10, name="Own ship")
-    targetship = Ship([0, 200], [5, 0], radius=10, name="Target ship")
+    ownship = Ship([0, 0], [0, 5], radius=10, name="Own ship")
+    targetship = Ship([0, 200], [0, -5], radius=10, name="Target ship")
 
     m = Metrics(ownship, targetship)
     print(f"DCPA = {m.DCPA():.2f} m")
@@ -312,6 +393,9 @@ if __name__ == "__main__":
     print(f"VO collision course: {m.VO()['collision']}")
 
     plot_encounter(ownship, targetship, m)
+
+    # Minkowski-sum view of the VO, same scenario as risk_metrics.png.
+    plot_minkowski_vo(ownship, targetship, m)
 
     # Representative encounters spanning the theta axis. The closing cases share
     # the same relative velocity but differ in lateral miss distance, so they

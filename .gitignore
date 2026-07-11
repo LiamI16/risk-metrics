@@ -1,0 +1,14 @@
+/__pycache__
+.venv
+
+/artifacts
+
+/minkowski_utils/NOTES.md
+/minkowski_utils/__pycache__
+/minkowski_utils/tests
+
+/vo_utils/__pycache__
+/vo_utils/tests
+
+
+
