@@ -1,4 +1,5 @@
 /__pycache__
+/.pytest_cache
 .venv
 
 /artifacts
@@ -9,6 +10,11 @@
 
 /vo_utils/__pycache__
 /vo_utils/tests
+
+# packaging (editable install / build)
+*.egg-info/
+build/
+dist/
 
 
 

@@ -1,15 +1,14 @@
 """Probabilistic (position-uncertainty) collision cones.
 
-Positional uncertainty on the relative position is Gaussian, relpos ~ N(mu, Sigma).
+Positional uncertainty on the relative position is Gaussian, pos_rel ~ N(mu, Sigma).
 A collision cone at confidence level k is the deterministic cone of the obstacle
-INFLATED by the k-sigma covariance ellipse:
+inflated by the k-sigma covariance ellipse:
 
     O_k = O  (+)  k * E_Sigma,     h_{O_k}(d) = h_O(d) + k * sqrt(d^T Sigma d).
 
 Nested cones over increasing k are the level sets of the collision-probability
 field -- a thin cone (small k) bounds high-probability collisions, a wide cone
-(large k) bounds low-probability ones.  Parametrised by sigma level k, not by a
-probability delta; that labelling is deferred (see docs/velocity_obstacles.md).
+(large k) bounds low-probability ones.
 """
 
 import numpy as np
@@ -22,7 +21,7 @@ from .cone import collision_cone, CollisionCone
 def covariance_ellipse(Sigma, k=1.0):
     """The k-sigma confidence ellipse of a 2-D Gaussian covariance Sigma.
 
-    Returns an Ellipse centred at the origin whose support function equals
+    Returns an Ellipse centered at the origin whose support function equals
         h(d) = k * sqrt(d^T Sigma d)
     """
 

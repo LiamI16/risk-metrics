@@ -6,16 +6,31 @@ the config-space obstacle boundary.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon as _Polygon
 
-from .obstacle import VelocityObstacle
+from minkowski_utils import MinkowskiSum
+from minkowski_utils.plotting import plot_shape
+from .cone import collision_cone
+from .obstacle import VelocityObstacle, config_space_obstacle
+from .uncertainty import probabilistic_collision_cone, covariance_ellipse
+
+_BIG = 1e6   # wedge/edge extent; clipped to the axes at render time
 
 
-def plot_collision_cone(cone, ax, apex=(0.0, 0.0), length=10.0,
+def _apply_style():
+    plt.rcParams.update({"font.family": "serif", "font.size": 11, "axes.grid": True,
+                         "grid.alpha": 0.3, "grid.linestyle": "--",
+                         "axes.axisbelow": True, "figure.dpi": 150})
+
+
+def plot_collision_cone(cone, ax, apex=(0.0, 0.0),
                         color="#d62728", alpha=0.15, lw=1.5, label=None):
-    """Draw a collision cone from ``apex`` along its two edge rays, shaded.
+    """Draw a collision cone from ``apex``: shaded half-infinite wedge + edges.
 
-    Works for a cone at the origin (relative-velocity space) or translated to a
-    target velocity (the velocity obstacle).
+    The cone is unbounded, so both the shaded wedge and its supporting lines are
+    drawn oversized and clipped to the axes at render time (via add_artist /
+    axline), which spans the plot without disturbing autoscaling.  Works at the
+    origin (relative-velocity space) or translated to a target velocity (the VO).
     """
     apex = np.asarray(apex, dtype=float)
     if cone.contains_origin:
@@ -25,19 +40,18 @@ def plot_collision_cone(cone, ax, apex=(0.0, 0.0), length=10.0,
         return ax
 
     e1, e2 = cone.edges
-    tri = np.array([apex, apex + e1 * length, apex + e2 * length])
-    ax.fill(tri[:, 0], tri[:, 1], color=color, alpha=alpha, lw=0, label=label)
+    wedge = _Polygon([apex, apex + e1 * _BIG, apex + e2 * _BIG], closed=True,
+                     facecolor=color, edgecolor="none", alpha=alpha, label=label)
+    ax.add_artist(wedge)                     # clips to axes, no autoscale effect
     for e in (e1, e2):
-        ax.plot([apex[0], apex[0] + e[0] * length],
-                [apex[1], apex[1] + e[1] * length], "-", color=color, lw=lw)
+        ax.axline(tuple(apex), tuple(apex + e), color=color, lw=lw)
     return ax
 
 
-def plot_velocity_obstacle(vo, ax, length=10.0, v_own=None):
+def plot_velocity_obstacle(vo, ax, v_own=None):
     """Draw the velocity obstacle: cone at apex = v_target, plus velocities."""
     c_safe, c_hit, c_tgt = "#2ca02c", "#d62728", "#1f77b4"
-    plot_collision_cone(vo.cone, ax, apex=vo.apex, length=length,
-                        label="velocity obstacle")
+    plot_collision_cone(vo.cone, ax, apex=vo.apex, label="velocity obstacle")
     ax.plot(0, 0, "+", color="k", ms=10)
     ax.annotate("", xy=vo.apex, xytext=(0, 0),
                 arrowprops=dict(arrowstyle="-|>", color=c_tgt, lw=2))
@@ -54,33 +68,33 @@ def plot_velocity_obstacle(vo, ax, length=10.0, v_own=None):
     return ax
 
 
-if __name__ == "__main__":
-    from minkowski_utils import Circle, Ellipse, MinkowskiSum
-    from minkowski_utils.plotting import plot_shape
-    from .cone import collision_cone
+def plot_probabilistic_cone(sigma_cones, ax, apex=(0.0, 0.0),
+                            color="#d62728", alpha=0.13):
+    """Draw nested k-sigma collision cones as a probability heatmap.
 
-    plt.rcParams.update({"font.family": "serif", "font.size": 11, "axes.grid": True,
-                         "grid.alpha": 0.3, "grid.linestyle": "--",
-                         "axes.axisbelow": True, "figure.dpi": 150})
+    Cones are drawn widest-first so the overlapping fills build up alpha toward
+    the narrow, high-probability core; each level's edges are labeled ``k s``.
+    """
+    apex = np.asarray(apex, dtype=float)
+    for sc in sorted(sigma_cones, key=lambda s: -s.k):
+        plot_collision_cone(sc.cone, ax, apex=apex, color=color,
+                            alpha=alpha, lw=1.1, label=fr"${sc.k:g}\sigma$")
+    ax.plot(*apex, "o", color=color, ms=5, zorder=6)
+    return ax
 
-    # --- scenario: own = disc, target = oriented ELLIPSE domain -------------
-    p_own, v_own = np.array([0.0, 0.0]), np.array([0.0, 5.0])
-    p_tgt, v_tgt = np.array([0.0, 120.0]), np.array([0.0, -6.0])
-    D_own = Circle(8.0)                                   # own footprint (origin)
-    D_tgt = Ellipse(25.0, 10.0, theta=np.deg2rad(60))    # target ellipse domain
-    relpos = p_tgt - p_own
 
-    # Config-space obstacle O = D_own (+) (-D_tgt), translated to relpos by
-    # Minkowski-summing a point (a zero-radius disc at relpos).
-    O = MinkowskiSum(D_own, D_tgt.reflect(), Circle(0.0, center=relpos))
+def deterministic_vo_figure(own, target):
+    """Two-panel VO figure for an encounter: relative space + velocity space."""
+    _apply_style()
+    O = config_space_obstacle(own.domain, target.domain, target.pos - own.pos)
     cone = collision_cone(O)
-    vo = VelocityObstacle(O, v_tgt)
+    vo = VelocityObstacle(O, target.vel)
 
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 6.3))
 
     # Panel A: relative-position space -- obstacle + tangent (collision) cone
     plot_shape(O, ax=axA, n=300, alpha=0.15, color="#d62728", label="config obstacle $O$")
-    plot_collision_cone(cone, axA, apex=(0, 0), length=175, alpha=0.08)
+    plot_collision_cone(cone, axA, apex=(0, 0), alpha=0.08)
     axA.plot(cone.contacts[:, 0], cone.contacts[:, 1], "o", mfc="white",
              color="#d62728", ms=6, zorder=6)
     axA.plot(0, 0, "o", color="#1f77b4", ms=9, label="own ship (origin)")
@@ -90,7 +104,7 @@ if __name__ == "__main__":
     axA.set_aspect("equal", adjustable="datalim")
 
     # Panel B: velocity space -- the velocity obstacle
-    plot_velocity_obstacle(vo, axB, length=16, v_own=v_own)
+    plot_velocity_obstacle(vo, axB, v_own=own.vel)
     axB.set_title("(b) velocity space: velocity obstacle", fontsize=11.5)
     axB.set_xlabel(r"$v_{East}$ [m/s]"); axB.set_ylabel(r"$v_{North}$ [m/s]")
     axB.legend(loc="upper right", fontsize=8.5)
@@ -98,9 +112,44 @@ if __name__ == "__main__":
 
     fig.suptitle("Velocity obstacle for an elliptical target domain", fontsize=13, y=0.98)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
-    from pathlib import Path
-    out_dir = Path(__file__).resolve().parents[1] / "artifacts" / "vo_plots"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / "vo_ellipse_demo.png"
-    fig.savefig(out, bbox_inches="tight")
-    print("saved", out)
+    return fig
+
+
+def probabilistic_vo_figure(own, target, Sigma, k_levels=(1.0, 2.0, 3.0)):
+    """Two-panel probabilistic VO figure: nested k-sigma cones (level sets)."""
+    _apply_style()
+    O = config_space_obstacle(own.domain, target.domain, target.pos - own.pos)
+    scones = probabilistic_collision_cone(O, Sigma, k_levels)
+
+    fig, (axC, axD) = plt.subplots(1, 2, figsize=(13, 6.3))
+
+    # Panel C: relative space -- inflated obstacles + nested cones
+    plot_shape(O, ax=axC, n=300, alpha=0.28, color="#d62728", label="obstacle $O$")
+    for k in k_levels:
+        Ok = MinkowskiSum(O, covariance_ellipse(Sigma, k))
+        plot_shape(Ok, ax=axC, n=300, fill=False, lw=0.8, color="#d62728", ls=":")
+    plot_probabilistic_cone(scones, axC, apex=(0, 0))
+    axC.plot(0, 0, "o", color="#1f77b4", ms=9, label="own ship")
+    axC.set_title("(a) relative space: k-sigma-inflated obstacles + cones", fontsize=11.5)
+    axC.set_xlabel("East [m]"); axC.set_ylabel("North [m]")
+    axC.legend(loc="lower left", fontsize=8.5)
+    axC.set_aspect("equal", adjustable="datalim")
+
+    # Panel D: velocity space -- nested VO cones (probability level sets)
+    plot_probabilistic_cone(scones, axD, apex=target.vel)
+    axD.plot(0, 0, "+", color="k", ms=10)
+    axD.annotate("", xy=target.vel, xytext=(0, 0),
+                 arrowprops=dict(arrowstyle="-|>", color="#1f77b4", lw=2))
+    axD.plot(*target.vel, "s", color="#1f77b4", ms=7, label=r"$v_{target}$")
+    axD.annotate("", xy=own.vel, xytext=(0, 0),
+                 arrowprops=dict(arrowstyle="-|>", color="k", lw=2))
+    axD.plot(*own.vel, "o", color="k", ms=8, label=r"$v_{own}$")
+    axD.set_title("(b) velocity space: probability level sets", fontsize=11.5)
+    axD.set_xlabel(r"$v_{East}$ [m/s]"); axD.set_ylabel(r"$v_{North}$ [m/s]")
+    axD.legend(loc="upper right", fontsize=8.5)
+    axD.set_aspect("equal", adjustable="datalim")
+
+    fig.suptitle("Probabilistic velocity obstacle: nested $k\\sigma$ cones "
+                 "(thin = high collision probability)", fontsize=13, y=0.98)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return fig

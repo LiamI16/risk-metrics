@@ -31,7 +31,7 @@ class Shape:
 
 
 class Circle(Shape):
-    """Filled disk of radius r centred at ``center``"""
+    """Filled disk of radius r centered at ``center``"""
 
     def __init__(self, r, center=(0.0, 0.0)):
         self.r = float(r)
@@ -53,7 +53,7 @@ class Circle(Shape):
 
 
 class Ellipse(Shape):
-    """Filled ellipse: semi-axes (a, b), centre c, rotation theta (rad).
+    """Filled ellipse: semi-axes (a, b), center c, rotation theta (rad).
 
     Written as an affine image of the unit disk.
     """
@@ -71,7 +71,7 @@ class Ellipse(Shape):
 
     @property
     def M(self):
-        """Affine map sending the unit disk to the (centred) ellipse."""
+        """Affine map sending the unit disk to the (centered) ellipse."""
         return self.R @ np.diag([self.a, self.b])
 
     def support(self, d):

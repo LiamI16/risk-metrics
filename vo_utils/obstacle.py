@@ -9,13 +9,30 @@ same as the collision cone; only the apex moves from the origin to v_target.
 
 import numpy as np
 
+from minkowski_utils import Circle, MinkowskiSum
 from .cone import collision_cone
+
+
+def config_space_obstacle(own_domain, target_domain, relpos):
+    """Config-space obstacle O = D_own (+) (-D_target), positioned at relpos.
+
+    Collision <=> relpos in O.  Positioning is done by Minkowski-summing a point
+    (a zero-radius disc at relpos), since O (+) {p} translates O by p.
+    """
+    return MinkowskiSum(own_domain, target_domain.reflect(),
+                        Circle(0.0, center=np.asarray(relpos, dtype=float)))
 
 
 class VelocityObstacle:
     def __init__(self, O, v_target, n_grid=1440):
         self.apex = np.asarray(v_target, dtype=float)   # cone apex = target velocity
         self.cone = collision_cone(O, n_grid=n_grid)    # relative-velocity geometry
+
+    @classmethod
+    def from_ships(cls, own, target, n_grid=1440):
+        """Build the VO for an encounter from two ships (own vs target)."""
+        O = config_space_obstacle(own.domain, target.domain, target.pos - own.pos)
+        return cls(O, target.vel, n_grid=n_grid)
 
     @property
     def edges(self):

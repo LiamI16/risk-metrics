@@ -19,7 +19,7 @@ def plot_shape(shape, ax=None, n=200, fill=True, alpha=0.15, lw=1.6,
     n : int
         Boundary samples.  Ignored by Polygon (returns its exact vertices).
     fill : bool
-        Shade the interior with ``alpha`` in the outline colour.
+        Shade the interior with ``alpha`` in the outline color.
     color, lw, label, **kw
         Forwarded to the outline ``plot`` (kw also to the line).
 
