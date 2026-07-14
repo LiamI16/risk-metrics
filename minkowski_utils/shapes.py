@@ -28,6 +28,9 @@ class Shape:
         theta = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
         dirs = np.column_stack([np.cos(theta), np.sin(theta)])
         return np.array([self.support_point(d) for d in dirs])
+    
+    def __str__(self):
+        return type(self).__name__
 
 
 class Circle(Shape):

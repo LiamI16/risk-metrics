@@ -48,12 +48,12 @@ if __name__ == "__main__":
     from .minkowski import MinkowskiSum
 
     A = Ellipse(3.0, 1.0, center=(0, 0), theta=np.deg2rad(20))
-    B = Ellipse(2.0, 1.5, center=(0, 0), theta=np.deg2rad(-40))
+    B = Polygon([(0.0, 3.0), (1, 1), (1, -2), (-1, -2), (-1, 1)])
 
-    ax = plot_shape(A, label="ellipse A")
-    poly = Polygon([(-4, -3), (-2, -3.5), (-1.5, -2)])
-    plot_shape(MinkowskiSum(poly, A), ax=ax, label = "")
-    plot_shape(poly,ax=ax, label='Polygon')
+    ax = plot_shape(A, label=str(A))
+    plot_shape(B,ax=ax, label=str(B))
+
+    plot_shape(MinkowskiSum(A, B), ax=ax, label = "Minkowski Sum")
 
     ax.legend(loc="upper left", fontsize=9)
     from pathlib import Path

@@ -110,7 +110,6 @@ def deterministic_vo_figure(own, target):
     axB.legend(loc="upper right", fontsize=8.5)
     axB.set_aspect("equal", adjustable="datalim")
 
-    fig.suptitle("Velocity obstacle for an elliptical target domain", fontsize=13, y=0.98)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     return fig
 
@@ -149,7 +148,5 @@ def probabilistic_vo_figure(own, target, Sigma, k_levels=(1.0, 2.0, 3.0)):
     axD.legend(loc="upper right", fontsize=8.5)
     axD.set_aspect("equal", adjustable="datalim")
 
-    fig.suptitle("Probabilistic velocity obstacle: nested $k\\sigma$ cones "
-                 "(thin = high collision probability)", fontsize=13, y=0.98)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     return fig

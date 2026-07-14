@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from minkowski_utils import Ellipse
+from minkowski_utils import Circle, Ellipse, Polygon
 from vo_utils import (
     Ship, Metrics, config_space_obstacle, probabilistic_collision_cone,
 )
@@ -22,9 +22,10 @@ ARTIFACTS = Path(__file__).resolve().parent / "artifacts" / "vo_plots"
 
 def build_encounter():
     """Own ship (disc domain) meeting a target with an oriented ellipse domain."""
-    own = Ship([0.0, 0.0], [0.0, 5.0], radius=8.0, name="own")
-    target = Ship([0.0, 120.0], [0.0, -6.0], name="target",
-                  domain=Ellipse(25.0, 10.0, theta=np.deg2rad(60)))
+    ship_shape = Polygon([(0.0, 3.0), (1, 1), (1, -2), (-1, -2), (-1, 1)])
+    own = Ship([0.0, 0.0], [0.0, 5.0], domain=ship_shape)
+    target = Ship([0.0, 70.0], [0.0, -6.0],
+                  domain=Ellipse(3, 2.0, theta=np.deg2rad(20)))
     return own, target
 
 
@@ -32,9 +33,14 @@ def main():
     own, target = build_encounter()
 
     # -- CPA risk metrics ----------------------------------------------------
+    # DCPA/TCPA are disc-domain metrics; the target here carries an ellipse
+    # domain, so they raise -- the VO below handles the arbitrary shape.
     m = Metrics(own, target)
-    print(f"DCPA = {m.DCPA():7.1f} m")
-    print(f"TCPA = {m.TCPA():7.1f} s")
+    try:
+        print(f"DCPA = {m.DCPA():7.1f} m")
+        print(f"TCPA = {m.TCPA():7.1f} s")
+    except TypeError as e:
+        print(f"DCPA/TCPA skipped: {e}")
 
     # -- Deterministic velocity obstacle -------------------------------------
     vo = m.vo()
@@ -42,7 +48,7 @@ def main():
 
     # -- Probabilistic (positional uncertainty) nested cones -----------------
     O = config_space_obstacle(own.domain, target.domain, target.pos - own.pos)
-    Sigma = np.array([[300.0, 120.0], [120.0, 200.0]])   # positional covariance [m^2]
+    Sigma = np.array([[30.0, 12.0], [12.0, 20.0]])   # positional covariance [m^2]
     scones = probabilistic_collision_cone(O, Sigma, k_levels=(1.0, 2.0, 3.0))
     for sc in scones:
         e1, e2 = sc.cone.edges
