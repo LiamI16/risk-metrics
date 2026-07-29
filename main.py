@@ -15,7 +15,10 @@ from minkowski_utils import Circle, Ellipse, Polygon
 from vo_utils import (
     Ship, Metrics, config_space_obstacle, probabilistic_collision_cone,
 )
-from vo_utils.plotting import deterministic_vo_figure, probabilistic_vo_figure
+from vo_utils.plotting import (
+    deterministic_vo_figure, probabilistic_vo_figure, velocity_uncertainty_vo_figure,
+    combined_uncertainty_vo_figure,
+)
 
 ARTIFACTS = Path(__file__).resolve().parent / "artifacts" / "vo_plots"
 
@@ -33,8 +36,7 @@ def main():
     own, target = build_encounter()
 
     # -- CPA risk metrics ----------------------------------------------------
-    # DCPA/TCPA are disc-domain metrics; the target here carries an ellipse
-    # domain, so they raise -- the VO below handles the arbitrary shape.
+    # DCPA/TCPA are disc-domain metrics
     m = Metrics(own, target)
     try:
         print(f"DCPA = {m.DCPA():7.1f} m")
@@ -55,12 +57,21 @@ def main():
         spread = np.degrees(np.arccos(np.clip(e1 @ e2, -1, 1)))
         print(f"{sc.k:.0f}-sigma cone angular width: {spread:6.1f} deg")
 
+    # Relative-velocity covariance (Sigma_own + Sigma_target); one ellipse for both.
+    Sigma_v = np.array([[0.5, 0.15], [0.15, 0.3]])   # [(m/s)^2]
+
     # -- Figures -------------------------------------------------------------
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     deterministic_vo_figure(own, target).savefig(
         ARTIFACTS / "vo_ellipse_demo.png", bbox_inches="tight")
     probabilistic_vo_figure(own, target, Sigma).savefig(
         ARTIFACTS / "pvo_ellipse_demo.png", bbox_inches="tight")
+    velocity_uncertainty_vo_figure(own, target, Sigma_v, k_levels=(1.0, 2.0, 3.0)).savefig(
+        ARTIFACTS / "vuvo_ellipse_demo.png", bbox_inches="tight")
+    combined_uncertainty_vo_figure(
+        own, target, Sigma, Sigma_v,
+        k_pos_levels=(1.0, 3.0), k_vel_levels=(1.0, 3.0)).savefig(
+        ARTIFACTS / "combined_uncertainty_demo.png", bbox_inches="tight")
     print(f"saved figures to {ARTIFACTS}")
 
 

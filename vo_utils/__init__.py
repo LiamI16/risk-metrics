@@ -7,10 +7,14 @@ from .metrics import Metrics
 from .cone import collision_cone, CollisionCone
 from .obstacle import VelocityObstacle, config_space_obstacle
 from .uncertainty import covariance_ellipse, probabilistic_collision_cone, SigmaCone
+from .velocity_uncertainty import (
+    robust_velocity_obstacle, RobustVelocityObstacle, uncertain_velocity_obstacle,
+)
 
 __all__ = [
     "Ship", "Metrics",
     "collision_cone", "CollisionCone",
     "VelocityObstacle", "config_space_obstacle",
     "covariance_ellipse", "probabilistic_collision_cone", "SigmaCone",
+    "robust_velocity_obstacle", "RobustVelocityObstacle", "uncertain_velocity_obstacle",
 ]
