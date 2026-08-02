@@ -14,12 +14,9 @@ from .cone import collision_cone
 
 
 def config_space_obstacle(own_domain, target_domain, relpos):
-    """Config-space obstacle O = D_own (+) (-D_target), positioned at relpos.
-
-    Collision <=> relpos in O.  Positioning is done by Minkowski-summing a point
-    (a zero-radius disc at relpos), since O (+) {p} translates O by p.
+    """Config-space obstacle O = D_target (+) (-D_own), positioned at relpos.
     """
-    return MinkowskiSum(own_domain, target_domain.reflect(),
+    return MinkowskiSum(target_domain, own_domain.reflect(),
                         Circle(0.0, center=np.asarray(relpos, dtype=float)))
 
 
