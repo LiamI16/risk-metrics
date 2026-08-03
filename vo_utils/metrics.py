@@ -14,6 +14,10 @@ from .obstacle import VelocityObstacle
 
 class Metrics:
     def __init__(self, ownship, targetship):
+        """
+        ownship:    the own Ship
+        targetship: the target Ship, measured relative to own.
+        """
         if not isinstance(ownship, Ship) or not isinstance(targetship, Ship):
             raise TypeError("ownship and targetship must be Ship instances")
         self.ownship = ownship
@@ -57,5 +61,8 @@ class Metrics:
         return float(np.linalg.norm(self.relpos + self.relvel * t))
 
     def vo(self, n_grid=1440):
-        """Velocity obstacle for this encounter (own ship vs target)."""
+        """Velocity obstacle for this encounter (own ship vs target).
+
+        n_grid: angular resolution of the tangent search for the cone.
+        """
         return VelocityObstacle.from_ships(self.ownship, self.targetship, n_grid=n_grid)

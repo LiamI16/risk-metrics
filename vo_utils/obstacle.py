@@ -15,6 +15,10 @@ from .cone import collision_cone
 
 def config_space_obstacle(own_domain, target_domain, relpos):
     """Config-space obstacle O = D_target (+) (-D_own), positioned at relpos.
+
+    own_domain:    own-ship convex domain (reflected into O).
+    target_domain: target-ship convex domain.
+    relpos:        target position relative to own, where O is placed.
     """
     return MinkowskiSum(target_domain, own_domain.reflect(),
                         Circle(0.0, center=np.asarray(relpos, dtype=float)))
@@ -22,12 +26,21 @@ def config_space_obstacle(own_domain, target_domain, relpos):
 
 class VelocityObstacle:
     def __init__(self, O, v_target, n_grid=1440):
+        """
+        O:        config-space obstacle (relative-position space).
+        v_target: target velocity (the cone apex).
+        n_grid:   angular resolution of the tangent search for the cone.
+        """
         self.apex = np.asarray(v_target, dtype=float)   # cone apex = target velocity
         self.cone = collision_cone(O, n_grid=n_grid)    # relative-velocity geometry
 
     @classmethod
     def from_ships(cls, own, target, n_grid=1440):
-        """Build the VO for an encounter from two ships (own vs target)."""
+        """Build the VO for an encounter from two ships (own vs target).
+
+        own, target: the two Ships.
+        n_grid:      angular resolution of the tangent search for the cone.
+        """
         O = config_space_obstacle(own.domain, target.domain, target.pos - own.pos)
         return cls(O, target.vel, n_grid=n_grid)
 
@@ -37,7 +50,7 @@ class VelocityObstacle:
         return self.cone.edges
 
     def contains(self, v_own):
-        """True if own velocity v_own is on a collision course.
+        """True if own velocity v_own is on a collision course. v_own: candidate own velocity.
 
         v_own collides iff the relative velocity w = v_own - v_target lies inside
         the collision cone.  Membership test: the cone bisector

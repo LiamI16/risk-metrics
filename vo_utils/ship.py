@@ -13,15 +13,21 @@ from minkowski_utils import Circle
 
 class Ship:
     def __init__(self, pos, vel, domain=None):
+        """
+        pos:    (2,) position.
+        vel:    (2,) constant velocity.
+        domain: convex Shape footprint/safety region; defaults to a radius-10 disc.
+        """
         self.pos = np.asarray(pos, dtype=float)
         self.vel = np.asarray(vel, dtype=float)
         self.domain = domain if domain is not None else Circle(10.0, center=(0.0, 0.0))
 
     def position_at(self, t):
-        """Position after time t under constant velocity (non-mutating)."""
+        """Position after time t under constant velocity (non-mutating). t: elapsed time."""
         return self.pos + self.vel * t
 
     def step(self, t):
+        """Advance the position by one step of duration t (mutating). t: elapsed time."""
         self.pos = self.pos + self.vel * t
 
     def __repr__(self):

@@ -21,6 +21,9 @@ from .cone import collision_cone, CollisionCone
 def covariance_ellipse(Sigma, k=1.0):
     """The k-sigma confidence ellipse of a 2-D Gaussian covariance Sigma.
 
+    Sigma: 2x2 covariance matrix.
+    k:     confidence level (number of standard deviations).
+
     Returns an Ellipse centered at the origin whose support function equals
         h(d) = k * sqrt(d^T Sigma d)
     """
@@ -40,6 +43,10 @@ class SigmaCone:
 
 def probabilistic_collision_cone(O, Sigma, k_levels=(1.0, 2.0, 3.0)):
     """Nested collision cones for a Gaussian-position-uncertain obstacle.
+
+    O:        convex obstacle in relative-position space.
+    Sigma:    2x2 relative-position covariance.
+    k_levels: confidence levels (sigmas) to inflate and cone, one per output.
 
     For each k in k_levels, inflate O by the k-sigma covariance ellipse (a
     Minkowski summand) and take its collision cone.  Returns a list of SigmaCone,
