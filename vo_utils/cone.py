@@ -33,13 +33,20 @@ def sign_change(arr):
 
 
 def collision_cone(O, n_grid=1440):
-    """Collision cone for convex obstacle O, via the two tangents from the origin.
+    """Collision cone for convex obstacle ``O``, via the two tangents from the origin.
 
-    O:      convex Shape in relative-position space.
-    n_grid: angular resolution of the sign-change search for brentq bracket.
+    Parameters
+    ----------
+    O : Shape
+        Convex obstacle in relative-position space.
+    n_grid : int
+        Angular resolution of the sign-change search bracketing brentq.
 
-    Returns a CollisionCone.  If the origin is inside O, contains_origin is True
-    and the geometric fields are None.
+    Returns
+    -------
+    CollisionCone
+        If the origin lies inside ``O``, ``contains_origin`` is True and the
+        geometric fields are None.
     """
     g_of = lambda p: O.support(_dir(p))
 

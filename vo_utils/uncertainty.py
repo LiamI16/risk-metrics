@@ -1,14 +1,11 @@
 """Probabilistic (position-uncertainty) collision cones.
 
-Positional uncertainty on the relative position is Gaussian, pos_rel ~ N(mu, Sigma).
-A collision cone at confidence level k is the deterministic cone of the obstacle
-inflated by the k-sigma covariance ellipse:
+For Gaussian relative position ``pos_rel ~ N(mu, Sigma)``, the confidence-level-k
+cone is the deterministic cone of the obstacle inflated by its k-sigma ellipse:
 
-    O_k = O  (+)  k * E_Sigma,     h_{O_k}(d) = h_O(d) + k * sqrt(d^T Sigma d).
+    O_k = O (+) k * E_Sigma,     h_{O_k}(d) = h_O(d) + k * sqrt(d^T Sigma d).
 
-Nested cones over increasing k are the level sets of the collision-probability
-field -- a thin cone (small k) bounds high-probability collisions, a wide cone
-(large k) bounds low-probability ones.
+Nested cones over increasing k are level sets of the collision-probability field.
 """
 
 import numpy as np
@@ -19,13 +16,19 @@ from .cone import collision_cone, CollisionCone
 
 
 def covariance_ellipse(Sigma, k=1.0):
-    """The k-sigma confidence ellipse of a 2-D Gaussian covariance Sigma.
+    """The k-sigma confidence ellipse of a 2-D Gaussian covariance.
 
-    Sigma: 2x2 covariance matrix.
-    k:     confidence level (number of standard deviations).
+    Parameters
+    ----------
+    Sigma : array_like, shape (2, 2)
+        Covariance matrix.
+    k : float
+        Confidence level (number of standard deviations).
 
-    Returns an Ellipse centered at the origin whose support function equals
-        h(d) = k * sqrt(d^T Sigma d)
+    Returns
+    -------
+    Ellipse
+        Centered at the origin, with support ``h(d) = k * sqrt(d^T Sigma d)``.
     """
 
     vals, vecs = np.linalg.eigh(Sigma)
@@ -44,13 +47,21 @@ class SigmaCone:
 def probabilistic_collision_cone(O, Sigma, k_levels=(1.0, 2.0, 3.0)):
     """Nested collision cones for a Gaussian-position-uncertain obstacle.
 
-    O:        convex obstacle in relative-position space.
-    Sigma:    2x2 relative-position covariance.
-    k_levels: confidence levels (sigmas) to inflate and cone, one per output.
+    For each ``k``, inflate ``O`` by its k-sigma covariance ellipse and take the
+    collision cone -- the level sets of the collision-probability field.
 
-    For each k in k_levels, inflate O by the k-sigma covariance ellipse (a
-    Minkowski summand) and take its collision cone.  Returns a list of SigmaCone,
-    one per level -- the level sets of the collision-probability field.
+    Parameters
+    ----------
+    O : Shape
+        Convex obstacle in relative-position space.
+    Sigma : array_like, shape (2, 2)
+        Relative-position covariance.
+    k_levels : sequence of float
+        Confidence levels (sigmas), one per output cone.
+
+    Returns
+    -------
+    list of SigmaCone
     """
 
     return [SigmaCone(k, collision_cone(MinkowskiSum(O, covariance_ellipse(Sigma, k)))) for k in k_levels]

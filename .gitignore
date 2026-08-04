@@ -10,6 +10,7 @@
 
 /vo_utils/__pycache__
 /vo_utils/tests
+/scripts
 
 # packaging (editable install / build)
 *.egg-info/
