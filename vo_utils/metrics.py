@@ -50,13 +50,15 @@ class Metrics:
         return -float(np.dot(self.relpos, self.relvel)) / speed_sq
 
     def DCPA(self):
-        """Distance at closest point of approach (m)."""
+        """Signed distance at closest point of approach (m).
+        """
         self._require_circular()
-        speed_sq = float(np.dot(self.relvel, self.relvel))
+        r, v = self.relpos, self.relvel
+        speed_sq = float(np.dot(v, v))
         if speed_sq < 1e-12:
-            return float(np.linalg.norm(self.relpos))
-        t = self.TCPA()
-        return float(np.linalg.norm(self.relpos + self.relvel * t))
+            return float(np.linalg.norm(r))
+        cross = float(v[0] * r[1] - v[1] * r[0])         # v x r (signed)
+        return cross / float(np.sqrt(speed_sq))
 
     def vo(self, n_grid=1440):
         """Velocity obstacle for this encounter (own ship vs target).
