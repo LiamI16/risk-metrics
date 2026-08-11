@@ -7,11 +7,13 @@ from .metrics import Metrics
 from .cone import collision_cone, CollisionCone
 from .obstacle import VelocityObstacle, config_space_obstacle
 from .uncertainty import covariance_ellipse, probabilistic_collision_cone, SigmaCone
-from .velocity_uncertainty import (
+from .uncertainty_models import (
     robust_velocity_obstacle, RobustVelocityObstacle, uncertain_velocity_obstacle,
-    VelocityUncertainty, Gaussian, UniformBox, SumUncertainty,
+    UncertaintyModel, Gaussian, UniformBox, UniformEllipse, IndependentSum,
 )
-from .sampling import sample_cpa, CpaSamples, anchored_covariances, shaped_covariance
+from .sampling import (
+    sample_cpa, CpaSamples, anchored_covariances, shaped_covariance, uniform_like,
+)
 from .scenario import (
     Scenario, CANONICAL_SCENARIOS,
     HEAD_ON, HEAD_ON_FASTER, CROSSING, CROSSING_WIDE, NORTH_EAST,
@@ -25,8 +27,8 @@ __all__ = [
     "VelocityObstacle", "config_space_obstacle",
     "covariance_ellipse", "probabilistic_collision_cone", "SigmaCone",
     "robust_velocity_obstacle", "RobustVelocityObstacle", "uncertain_velocity_obstacle",
-    "VelocityUncertainty", "Gaussian", "UniformBox", "SumUncertainty",
-    "sample_cpa", "CpaSamples", "anchored_covariances", "shaped_covariance",
+    "UncertaintyModel", "Gaussian", "UniformBox", "UniformEllipse", "IndependentSum",
+    "sample_cpa", "CpaSamples", "anchored_covariances", "shaped_covariance", "uniform_like",
     "Scenario", "CANONICAL_SCENARIOS",
     "HEAD_ON", "HEAD_ON_FASTER", "CROSSING", "CROSSING_WIDE", "NORTH_EAST",
     "OVERTAKING", "COLLINEAR_SLOWER", "COLLINEAR_EQUAL", "COLLINEAR_FALLING_BEHIND",

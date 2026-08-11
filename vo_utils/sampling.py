@@ -1,18 +1,37 @@
+"""Monte-Carlo sampling of the (TCPA, DCPA) distribution induced by uncertainty."""
+
 from typing import NamedTuple
 
 import numpy as np
 
 
 class CpaSamples(NamedTuple):
-    dcpa: np.ndarray    # (n,)  closest-approach distances (>= 0)
+    """One encounter's sampled closest-approach metrics, with the draws behind them."""
+
+    dcpa: np.ndarray    # (n,)  SIGNED closest-approach distances
     tcpa: np.ndarray    # (n,)  times to closest approach (negative => already past)
     relpos: np.ndarray  # (n,2) sampled relative positions r
     relvel: np.ndarray  # (n,2) sampled relative velocities v
 
+    @property
+    def miss_distance(self):
+        """Unsigned closest-approach distance ``|dcpa|``."""
+        return np.abs(self.dcpa)
 
-def _as_cov(Sigma):
-    """A 2x2 covariance, or zero matrix when Sigma is None."""
-    return np.zeros((2, 2)) if Sigma is None else np.asarray(Sigma, dtype=float)
+
+def _draw(spec, mean, n, rng):
+    """Draw ``n`` samples about ``mean`` from a channel's noise spec.
+
+    ``spec`` is None (exact), an UncertaintyModel, or a bare 2x2 covariance, which is
+    treated as ``Gaussian(spec)`` so callers holding a plain Sigma (scenarios,
+    ``anchored_covariances``) need not wrap it.
+    """
+    mean = np.asarray(mean, dtype=float)
+    if spec is None:
+        return np.tile(mean, (n, 1))
+    if hasattr(spec, "sample"):
+        return mean + spec.sample(n, rng)
+    return rng.multivariate_normal(mean, np.asarray(spec, dtype=float), size=n)
 
 
 def anchored_covariances(own, target, alpha, beta, vel_scale=None):
@@ -69,19 +88,58 @@ def shaped_covariance(sigma, ecc, major_axis):
     return s_major ** 2 * np.outer(u, u) + s_minor ** 2 * np.outer(perp, perp)
 
 
-def sample_cpa(own, target, Sigma_pos=None, Sigma_vel=None, n=10000, rng=None):
-    """Monte-Carlo (DCPA, TCPA) for one encounter under Gaussian relative uncertainty.
+def uniform_like(Sigma, kind="ellipse"):
+    """A bounded uniform model with the same covariance as ``N(0, Sigma)``.
 
-    Means are ``r_hat = target.pos - own.pos`` and ``v_hat = target.vel - own.vel``.
-    Degenerate draws with ``||v|| ~ 0`` follow the Metrics convention: TCPA = 0,
-    DCPA = ``||r||``.
+    Equal-covariance anchoring, so a Gaussian-vs-uniform comparison isolates
+    distribution *shape* at matched spread rather than confounding it with scale.
+
+    Parameters
+    ----------
+    Sigma : array_like, shape (2, 2)
+        Covariance to match. Its eigenvectors set the body's axes.
+    kind : {'ellipse', 'box'}
+        ``'ellipse'`` gives semi-axes ``2*sqrt(lambda)`` (a uniform ellipse of
+        semi-axis ``2*sigma`` has per-axis variance ``sigma^2``), so its hard edge is
+        the Gaussian 2-sigma ellipse. ``'box'`` gives half-widths ``sqrt(3)*sqrt(lambda)``
+        (a uniform interval of half-width ``h`` has variance ``h^2/3``).
+
+    Returns
+    -------
+    UniformEllipse or UniformBox
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is neither ``'ellipse'`` nor ``'box'``.
+    """
+    from .uncertainty_models import UniformEllipse, UniformBox
+    vals, vecs = np.linalg.eigh(np.asarray(Sigma, dtype=float))
+    order = np.argsort(vals)[::-1]                       # major (largest) axis first
+    vals, vecs = vals[order], vecs[:, order]
+    theta = float(np.arctan2(vecs[1, 0], vecs[0, 0]))    # angle of the major eigenvector
+    sig = np.sqrt(np.maximum(vals, 0.0))
+    if kind == "ellipse":
+        return UniformEllipse(a=2.0 * sig[0], b=2.0 * sig[1], theta=theta)
+    if kind == "box":
+        return UniformBox(half_widths=np.sqrt(3.0) * sig, theta=theta)
+    raise ValueError(f"kind must be 'ellipse' or 'box', got {kind!r}")
+
+
+def sample_cpa(own, target, Sigma_pos=None, Sigma_vel=None, n=10000, rng=None):
+    """Monte-Carlo (signed DCPA, TCPA) for one encounter under relative uncertainty.
+
+    Draws are taken about ``r_hat = target.pos - own.pos`` and
+    ``v_hat = target.vel - own.vel``; only the relative pair matters, so own and
+    target-side uncertainty enter through their sum.
 
     Parameters
     ----------
     own, target : Ship
         The two ships.
-    Sigma_pos, Sigma_vel : array_like, shape (2, 2), optional
-        Relative covariances; None leaves that channel exact.
+    Sigma_pos, Sigma_vel : array_like or UncertaintyModel, optional
+        Per-channel relative noise: None (exact), a 2x2 covariance (Gaussian), or a
+        model exposing ``sample(n, rng)``. None leaves that channel exact.
     n : int
         Number of samples.
     rng : numpy.random.Generator, optional
@@ -97,8 +155,8 @@ def sample_cpa(own, target, Sigma_pos=None, Sigma_vel=None, n=10000, rng=None):
     r_hat = np.asarray(target.pos, dtype=float) - np.asarray(own.pos, dtype=float)
     v_hat = np.asarray(target.vel, dtype=float) - np.asarray(own.vel, dtype=float)
 
-    r = rng.multivariate_normal(r_hat, _as_cov(Sigma_pos), size=n)   # (n,2)
-    v = rng.multivariate_normal(v_hat, _as_cov(Sigma_vel), size=n)   # (n,2)
+    r = _draw(Sigma_pos, r_hat, n, rng)                             # (n,2)
+    v = _draw(Sigma_vel, v_hat, n, rng)                             # (n,2)
 
     speed_sq = np.einsum("ij,ij->i", v, v)                           # ||v||^2
     moving = speed_sq > 1e-12
@@ -106,9 +164,9 @@ def sample_cpa(own, target, Sigma_pos=None, Sigma_vel=None, n=10000, rng=None):
     tcpa = np.zeros(n)                                               # 0 where no relative motion
     np.divide(-np.einsum("ij,ij->i", r, v), speed_sq, out=tcpa, where=moving)
 
-    cross = r[:, 0] * v[:, 1] - r[:, 1] * v[:, 0]                    # r x v
+    cross = v[:, 0] * r[:, 1] - v[:, 1] * r[:, 0]                    # v x r (signed)
     speed = np.where(moving, np.sqrt(speed_sq), 1.0)                 # avoid 0/0 at static draws
-    dcpa = np.where(moving, np.abs(cross) / speed,
-                    np.linalg.norm(r, axis=1))                       # -> ||r|| when static
+    dcpa = np.where(moving, cross / speed,                           # signed miss distance
+                    np.linalg.norm(r, axis=1))                       # -> ||r|| (unsigned) when static
 
     return CpaSamples(dcpa, tcpa, r, v)
