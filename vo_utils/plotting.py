@@ -3,7 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as _Polygon, Rectangle as _Rectangle
-from matplotlib.colors import TwoSlopeNorm, Normalize, LinearSegmentedColormap
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 from matplotlib.lines import Line2D
 
 from minkowski_utils import MinkowskiSum, Circle, Shape
@@ -16,15 +16,33 @@ from .uncertainty_models import (
     robust_velocity_obstacle, UncertaintyModel, Gaussian,
 )
 from .sampling import sample_cpa
+from .scales import GRIDSIZE, FRAME_Q, iqr
 
 _BIG = 1e6   # wedge/edge extent; clipped to the axes at render time
 
-# Metric-field colormaps: orange = positive, blue = negative, pale = near zero, in
-# every panel. A single-signed field takes the matching arm of the diverging ramp.
-# Midpoint is gray, not white, and the arms start pale-but-not-white, so neither is
-# lost under the density alpha in _plot_vo_metric.
-_DIVERGING = LinearSegmentedColormap.from_list(
-    "vo_diverging", ["#0d366b", "#2a78d6", "#f0efec", "#e08a63", "#eb6834", "#8c2f10"])
+# ---- Own-velocity panels, binned (mark="hex") ----
+MINCNT = 1
+HEX_EDGE_LW = 0.25              # outlines, so adjacent bins of similar color read as cells
+HEX_EDGE_COLOR = "#00000022"
+
+# ---- Own-velocity panels, per sample (mark="scatter") ----
+SCATTER_DRAW_N = 2000           # marks rendered per velocity-frame panel, of n samples
+SCATTER_DRAW_SEED = 0           # fixed, so the same marks appear in every panel of a row
+SCATTER_SIZE = 9
+SCATTER_DENSITY_ALPHA = 0.25    # low, so pile-up reads; set for the drawn count, not n
+SCATTER_VALUE_ALPHA = 0.80      # high, so color rather than overlap is what reads
+SCATTER_EDGE_LW = 0.3
+SCATTER_EDGE_COLOR = "#000000"
+
+OUTCOME_COLORS = ("#2ca02c", "#d62728")   # (safe, collision) -- as in _plot_cpa_joint
+
+# ---- Colormaps ----
+# Metric-field colormaps: orange = positive, blue = negative, white = zero, in every panel.
+# Stops are positioned explicitly: from_list spaces a bare color list evenly, which puts
+# the neutral off-center.
+_DIVERGING = LinearSegmentedColormap.from_list("vo_diverging", [
+    (0.00, "#08203f"), (0.32, "#2a78d6"), (0.50, "#ffffff"),
+    (0.68, "#eb6834"), (1.00, "#5e1d08")])
 _SEQ_POS = LinearSegmentedColormap.from_list(
     "vo_seq_pos", ["#f6d9cb", "#e08a63", "#eb6834", "#8c2f10"])
 _SEQ_NEG = LinearSegmentedColormap.from_list(
@@ -178,6 +196,8 @@ def _plot_position_space(ax, own, target, Sigma_pos=None, k_levels=(1.0, 2.0, 3.
     ax.plot(0, 0, "o", color="#1f77b4", ms=9, label="own ship")
 
     # Relative-velocity arrow from the origin: collision iff it points into the cone.
+    # The ONE place oriented own - target: with the ownship at the origin it closes on the
+    # obstacle at v_O - v_T. Elsewhere v_rel = v_T - v_O; the legend states the identity.
     w = np.asarray(own.vel, dtype=float) - np.asarray(target.vel, dtype=float)
     wn = np.linalg.norm(w)
     if wn > 1e-9:
@@ -187,13 +207,15 @@ def _plot_position_space(ax, own, target, Sigma_pos=None, k_levels=(1.0, 2.0, 3.
         ax.annotate("", xy=tip, xytext=(0, 0),
                     arrowprops=dict(arrowstyle="-|>", color="#1f77b4", lw=2))
         ax.update_datalim([(0, 0), tip])         # keep arrow in frame
-        ax.plot([], [], color="#1f77b4", lw=2, label=r"rel. velocity $v_O - v_T$")
+        ax.plot([], [], color="#1f77b4", lw=2,
+                label=r"rel. velocity $v_O - v_T = -v_{rel}$")
 
-    # Deterministic CPA readout
+    # Deterministic CPA readout, upper left: the legend owns the bottom, and every
+    # canonical scenario puts its target north or east, so this corner stays clear.
     m = Metrics(own, target)
-    ax.text(0.98, 0.02, f"TCPA = {m.TCPA():.1f} s\nDCPA = {m.DCPA():.1f} m\n"
+    ax.text(0.02, 0.98, f"TCPA = {m.TCPA():.1f} s\nDCPA = {m.DCPA():.1f} m\n"
             fr"$R_{{safe}}$ = {m.safety_radius:.0f} m", transform=ax.transAxes,
-            fontsize=9, va="bottom", ha="right",
+            fontsize=9, va="top", ha="left",
             bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="gray", alpha=0.9))
 
     ax.set_title("position space", fontsize=11.5)
@@ -244,56 +266,162 @@ def _plot_velocity_space(ax, own, target, Sigma_vel=None, k_levels=(1.0, 2.0, 3.
 
 def _plot_vo_metric(ax, own, target, samples, values, cbar_label, Sigma_vel=None,
                     k_levels=(1.0, 2.0, 3.0), reduce=np.median, cmap=None,
-                    diverging=False, symmetric=False, div_cmap=_DIVERGING, gridsize=40,
-                    alpha_floor=0.35):
+                    diverging=False, div_cmap=_DIVERGING, gridsize=GRIDSIZE,
+                    mincnt=MINCNT, clim=None, half_width=None):
     """VO level sets over the sampled velocities, hexbinned and colored by a metric.
 
     Each sample sits at the own-velocity it implies (v_target - v); each bin's color
-    is ``reduce`` over its metric values -- median for the field, np.ptp / IQR for
-    spread. Color limits are robust percentiles, so the Cauchy-tail bins near the
-    apex don't wash out the map. Pass ``cmap`` to override the automatic choice.
+    is ``reduce`` over its metric values -- median for the field, IQR for spread.
+
+    Color encodes magnitude only; sample count is ``_plot_density``'s job.
+
+    ``clim`` is the symmetric limit (diverging) or upper limit (single-signed) shared
+    across a catalog -- see :mod:`vo_utils.scales`. ``half_width`` likewise fixes the
+    panel span. Both fall back to this figure's own robust percentiles when None, which
+    keeps ``three_panel`` / ``four_panel`` and ad-hoc calls working as before.
     """
     vown = np.asarray(target.vel, dtype=float) - samples.relvel       # own-velocity frame
     hb = ax.hexbin(vown[:, 0], vown[:, 1], C=values, reduce_C_function=reduce,
-                   gridsize=gridsize, mincnt=1, cmap=cmap, linewidths=0.0, zorder=1)
-
-    # Sparse bins fade rather than being dropped: conditioned on v the metrics are
-    # near-deterministic, so a 1-sample bin's color is sound and only its weight is
-    # suspect. sqrt keeps the fade gentle near the median, or the Poisson scatter of
-    # a flat density (the uniform models) speckles the field. Identical hexbin args
-    # so the count bins line up one-for-one.
-    counts = ax.hexbin(vown[:, 0], vown[:, 1], gridsize=gridsize, mincnt=1)
-    cnt = np.asarray(counts.get_array(), dtype=float)
-    counts.remove()
-    if cnt.size == hb.get_array().size:
-        denom = float(np.percentile(cnt, 50)) or 1.0
-        hb.set_alpha(np.clip(np.sqrt(cnt / denom), alpha_floor, 1.0))
+                   gridsize=gridsize, mincnt=mincnt, cmap=cmap, zorder=1,
+                   linewidths=HEX_EDGE_LW, edgecolors=HEX_EDGE_COLOR)
 
     binned = np.asarray(hb.get_array(), dtype=float)
     lo, hi = np.nanpercentile(binned, [2, 98])
-    if diverging and lo < 0 < hi:
+    extend = "neither"
+    if diverging:
+        # Symmetric about zero: TwoSlopeNorm gives the arms different data widths, so
+        # equal color steps would mean different numbers of meters on each side.
+        m = clim if clim is not None else (float(np.nanpercentile(np.abs(binned), 98)) or 1.0)
         hb.set_cmap(div_cmap)
-        if symmetric:                                    # 0 at center, symmetric range
-            m = float(np.nanpercentile(np.abs(binned), 98)) or 1.0
-            hb.set_norm(Normalize(vmin=-m, vmax=m))
-        else:                                            # 0 at center, per-side contrast
-            hb.set_norm(TwoSlopeNorm(vmin=lo, vcenter=0.0, vmax=hi))
-    elif cmap is None:
-        # Single-signed: the arm on that side, reversed for negatives so pale stays
-        # at the zero end. Unsigned metrics (spread) get a plain blue ramp.
-        if not diverging:
-            hb.set_cmap(_SEQ_NEG)
-        else:
-            hb.set_cmap(_SEQ_POS if hi > 0 else _SEQ_NEG.reversed())
-        hb.set_norm(Normalize(vmin=lo, vmax=hi))
+        hb.set_norm(Normalize(vmin=-m, vmax=m))
+        extend = "both" if clim is not None else "neither"
     else:
-        hb.set_norm(Normalize(vmin=lo, vmax=hi))
-    cb = ax.figure.colorbar(hb, ax=ax, fraction=0.046, pad=0.02)
+        # Single-signed (spread, or a one-sided field): pale at the zero end.
+        if cmap is None:
+            hb.set_cmap(_SEQ_NEG if hi <= 0 else _SEQ_POS)
+        top = clim if clim is not None else hi
+        hb.set_norm(Normalize(vmin=min(lo, 0.0), vmax=top))
+        extend = "max" if clim is not None else "neither"
+    cb = ax.figure.colorbar(hb, ax=ax, fraction=0.046, pad=0.02, extend=extend)
     cb.set_label(cbar_label, fontsize=9)
 
-    # Level sets on top, dark so they read over any colormap.
-    vo, frame = _draw_vo_levelsets(ax, own, target, Sigma_vel, k_levels, fill_alpha=0.0,
-                                   color="k", lw=0.9, ls="--", label=False, deterministic=True)
+    frame = _vo_overlay(ax, own, target, Sigma_vel, k_levels)
+
+    if half_width is None:
+        # Frame the level-set caps and the cloud together.
+        lov, hiv = np.nanpercentile(vown, [1, 99], axis=0)
+        _square_limits((ax,), frame + [tuple(lov), tuple(hiv)])
+    else:
+        (x0, x1), (y0, y1) = _vel_frame(own, target, vown, half_width)
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+    ax.set_xlabel(r"$v_{East}$ [m/s]"); ax.set_ylabel(r"$v_{North}$ [m/s]")
+    ax.set_aspect("equal", adjustable="box")
+    return ax
+
+
+def _plot_vo_outcome(ax, own, target, samples, R, horizon=None, Sigma_vel=None,
+                     k_levels=(1.0, 2.0, 3.0), half_width=None, draw_n=SCATTER_DRAW_N):
+    """Every sample in the own-velocity frame, colored by whether it collides.
+
+    The sampled probabilistic VO, and the scatter catalog's stand-in for the binned IQR
+    panel. Its red fraction is the same P[collision] the (TCPA, DCPA) panels report,
+    projected onto own-velocity; where red and green interleave is the deterministic VO
+    boundary blurred by the uncertainty.
+    """
+    vown = np.asarray(target.vel, dtype=float) - samples.relvel
+    hit = (np.abs(samples.dcpa) <= R) & (samples.tcpa >= 0)
+    if horizon is not None:
+        hit &= samples.tcpa <= horizon
+    safe_c, hit_c = OUTCOME_COLORS
+    keep = np.zeros(len(vown), bool)
+    keep[_thin(len(vown), draw_n)] = True      # P below still uses every sample
+    for sel, c, lbl in ((~hit & keep, safe_c, "safe"), (hit & keep, hit_c, "collision")):
+        if sel.any():
+            ax.scatter(vown[sel, 0], vown[sel, 1], s=SCATTER_SIZE, c=c, zorder=1,
+                       alpha=SCATTER_VALUE_ALPHA, linewidths=SCATTER_EDGE_LW,
+                       edgecolors=SCATTER_EDGE_COLOR, label=lbl)
+
+    frame = _vo_overlay(ax, own, target, Sigma_vel, k_levels)
+    if half_width is None:
+        lov, hiv = np.nanpercentile(vown, [1, 99], axis=0)
+        _square_limits((ax,), frame + [tuple(lov), tuple(hiv)])
+    else:
+        (x0, x1), (y0, y1) = _vel_frame(own, target, vown, half_width)
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+    ax.set_xlabel(r"$v_{East}$ [m/s]"); ax.set_ylabel(r"$v_{North}$ [m/s]")
+    ax.set_aspect("equal", adjustable="box")
+    return ax, float(hit.mean())
+
+
+def _plot_field(scatter, ax, own, target, samples, values, label, Sigma_vel, k_levels,
+                half_width, clim):
+    """Draw a signed metric field as either a binned median or a raw scatter."""
+    if scatter:
+        return _plot_vo_scatter(ax, own, target, samples, values, label,
+                                Sigma_vel=Sigma_vel, k_levels=k_levels,
+                                clim=clim, half_width=half_width)
+    return _plot_vo_metric(ax, own, target, samples, values, label, Sigma_vel=Sigma_vel,
+                           k_levels=k_levels, diverging=True, clim=clim,
+                           half_width=half_width)
+
+
+def _thin(n, draw_n):
+    """A fixed random subset of ``n`` indices, or all of them.
+
+    Display-only and seeded: above ~SCATTER_DRAW_N marks the points stop resolving.
+    Never applied to anything a reported number is computed from.
+    """
+    if draw_n is None or n <= draw_n:
+        return slice(None)
+    return np.random.default_rng(SCATTER_DRAW_SEED).choice(n, size=draw_n, replace=False)
+
+
+def _plot_vo_scatter(ax, own, target, samples, values=None, cbar_label=None,
+                     Sigma_vel=None, k_levels=(1.0, 2.0, 3.0), div_cmap=_DIVERGING,
+                     clim=None, half_width=None, draw_n=SCATTER_DRAW_N):
+    """Per-sample scatter in the own-velocity frame -- the un-aggregated alternative.
+
+    Two modes on disjoint visual channels: ``values`` given colors each sample by its
+    metric (magnitude), ``values`` None draws one flat color at low alpha so only
+    overlap varies (density). Monochrome there is what keeps the two channels apart.
+    """
+    vown = np.asarray(target.vel, dtype=float) - samples.relvel
+    i = _thin(len(vown), draw_n)
+    if values is None:
+        # Same subset the magnitude panels draw, so one mark can be followed across a row.
+        ax.scatter(vown[i, 0], vown[i, 1], s=SCATTER_SIZE, lw=0,
+                   alpha=SCATTER_DENSITY_ALPHA, color="#12345e", zorder=1)
+    else:
+        m = clim if clim is not None else (float(np.nanpercentile(np.abs(values), 99)) or 1.0)
+        sc = ax.scatter(vown[i, 0], vown[i, 1], c=np.asarray(values)[i], s=SCATTER_SIZE,
+                        alpha=SCATTER_VALUE_ALPHA, cmap=div_cmap,
+                        norm=Normalize(-m, m), zorder=1,
+                        linewidths=SCATTER_EDGE_LW, edgecolors=SCATTER_EDGE_COLOR)
+        cb = ax.figure.colorbar(sc, ax=ax, fraction=0.046, pad=0.02,
+                                extend="both" if clim is not None else "neither")
+        cb.set_label(cbar_label, fontsize=9)
+        cb.solids.set_alpha(1.0)              # the bar should read at full strength
+
+    frame = _vo_overlay(ax, own, target, Sigma_vel, k_levels)
+    if half_width is None:
+        lov, hiv = np.nanpercentile(vown, [1, 99], axis=0)
+        _square_limits((ax,), frame + [tuple(lov), tuple(hiv)])
+    else:
+        (x0, x1), (y0, y1) = _vel_frame(own, target, vown, half_width)
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+    ax.set_xlabel(r"$v_{East}$ [m/s]"); ax.set_ylabel(r"$v_{North}$ [m/s]")
+    ax.set_aspect("equal", adjustable="box")
+    return ax
+
+
+def _vo_overlay(ax, own, target, Sigma_vel, k_levels):
+    """Deterministic VO, k-sigma level sets and the two velocity markers, drawn on top.
+
+    Shared by every own-velocity-frame panel (metric, spread, density) so they register
+    against the same landmarks. Returns the level-set frame points for auto-framing.
+    """
+    _, frame = _draw_vo_levelsets(ax, own, target, Sigma_vel, k_levels, fill_alpha=0.0,
+                                  color="k", lw=0.9, ls="--", label=False, deterministic=True)
     # Markers only: this panel is zoomed to the cloud, so an arrow from the (usually
     # off-frame) origin would shoot off the plot.
     ax.plot(*target.vel, "s", color="#1f77b4", ms=7)     # apex = v_target
@@ -302,13 +430,47 @@ def _plot_vo_metric(ax, own, target, samples, values, cbar_label, Sigma_vel=None
     ax.legend(handles=[Line2D([], [], color="k", lw=1.8, ls="-", label="deterministic VO"),
                        Line2D([], [], color="k", lw=0.9, ls="--", label=lvl_label)],
               loc="lower left", fontsize=7.5, framealpha=0.85)
+    return frame
 
-    # Frame the level-set caps and the cloud together.
-    lov, hiv = np.nanpercentile(vown, [1, 99], axis=0)
-    _square_limits((ax,), frame + [tuple(lov), tuple(hiv)])
+
+def _plot_density(ax, own, target, samples, Sigma_vel=None, k_levels=(1.0, 2.0, 3.0),
+                  gridsize=GRIDSIZE, mincnt=MINCNT, half_width=None):
+    """Sample COUNT per bin, in the own-velocity frame -- frequency, on its own axes.
+
+    Frequency on its own axes, rather than smuggled into the metric panels as opacity.
+    The velocity-noise panel holds the same information but in the relative frame, which
+    is a point reflection away -- not something a reader can undo by eye.
+    """
+    vown = np.asarray(target.vel, dtype=float) - samples.relvel
+    hb = ax.hexbin(vown[:, 0], vown[:, 1], gridsize=gridsize, mincnt=mincnt,
+                   cmap=_SEQ_NEG, zorder=1,
+                   linewidths=HEX_EDGE_LW, edgecolors=HEX_EDGE_COLOR)
+    cb = ax.figure.colorbar(hb, ax=ax, fraction=0.046, pad=0.02)
+    cb.set_label("samples per bin", fontsize=9)
+
+    frame = _vo_overlay(ax, own, target, Sigma_vel, k_levels)
+    if half_width is None:
+        lov, hiv = np.nanpercentile(vown, [1, 99], axis=0)
+        _square_limits((ax,), frame + [tuple(lov), tuple(hiv)])
+    else:
+        (x0, x1), (y0, y1) = _vel_frame(own, target, vown, half_width)
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
     ax.set_xlabel(r"$v_{East}$ [m/s]"); ax.set_ylabel(r"$v_{North}$ [m/s]")
     ax.set_aspect("equal", adjustable="box")
     return ax
+
+
+def _vel_frame(own, target, vown, half_width):
+    """((x0, x1), (y0, y1)) for a velocity panel of fixed half-WIDTH.
+
+    What is shared across the catalog is the SPAN, centered on this encounter's cloud; a
+    shared absolute range would leave most panels empty. The apex is excluded from the
+    centering -- it can sit well outside the span and would drag the frame off the
+    samples the panel is about.
+    """
+    lov, hiv = np.nanpercentile(np.asarray(vown, dtype=float), FRAME_Q, axis=0)
+    cx, cy = (lov + hiv) / 2.0
+    return (cx - half_width, cx + half_width), (cy - half_width, cy + half_width)
 
 
 def _noise_outlines(spec, k_levels):
@@ -318,13 +480,17 @@ def _noise_outlines(spec, k_levels):
     return [_body(spec, k) for k in _levels_for(spec, k_levels)]
 
 
-def _plot_noise(ax, samples2d, center, spec, title, xlabel, ylabel, k_levels=(1.0, 2.0, 3.0)):
+def _plot_noise(ax, samples2d, center, spec, title, xlabel, ylabel, k_levels=(1.0, 2.0, 3.0),
+                half_width=None):
     """Scatter the draws (relpos or relvel) about their mean, with the body outline.
 
     Shows the sampling distribution in place: peaked Gaussian vs flat-edged uniform.
+
+    ``half_width`` fixes the span across a catalog so noise clouds are comparable between
+    figures; None auto-frames on this figure's own cloud and body outlines.
     """
     c = np.asarray(center, dtype=float)
-    ax.scatter(samples2d[:, 0], samples2d[:, 1], s=3, alpha=0.12, color="#4c72b0", lw=0)
+    ax.scatter(samples2d[:, 0], samples2d[:, 1], s=4, alpha=0.28, color="#4c72b0", lw=0)
     shapes = _noise_outlines(spec, k_levels)
     for sh in shapes:
         b = sh.sample_boundary(200) + c                  # bodies are origin-centered
@@ -332,11 +498,14 @@ def _plot_noise(ax, samples2d, center, spec, title, xlabel, ylabel, k_levels=(1.
         ax.plot(b[:, 0], b[:, 1], color="#d62728", lw=1.1)
     ax.plot(c[0], c[1], "+", color="k", ms=8)
 
-    dirs = (np.array([1., 0]), np.array([-1., 0]), np.array([0, 1.]), np.array([0, -1.]))
-    off = samples2d - c
-    reach = max([sh.support(d) for sh in shapes for d in dirs] +
-                ([float(np.nanpercentile(np.abs(off), 99))] if off.size else [0.0]))
-    reach = max(reach, 1e-6) * 1.12
+    if half_width is not None:
+        reach = half_width
+    else:
+        dirs = (np.array([1., 0]), np.array([-1., 0]), np.array([0, 1.]), np.array([0, -1.]))
+        off = samples2d - c
+        reach = max([sh.support(d) for sh in shapes for d in dirs] +
+                    ([float(np.nanpercentile(np.abs(off), 99))] if off.size else [0.0]))
+        reach = max(reach, 1e-6) * 1.12
     ax.set_xlim(c[0] - reach, c[0] + reach); ax.set_ylim(c[1] - reach, c[1] + reach)
     ax.set_title(title, fontsize=11.5)
     ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
@@ -345,12 +514,17 @@ def _plot_noise(ax, samples2d, center, spec, title, xlabel, ylabel, k_levels=(1.
 
 
 def _plot_cpa_joint(subfig, own, target, Sigma_pos=None, Sigma_vel=None,
-                    n=20000, R=None, horizon=None, rng=None, samples=None):
+                    n=20000, R=None, horizon=None, rng=None, samples=None,
+                    tau_lim=None, d_lim=None, title=None):
     """(TCPA, DCPA) jointplot -- scatter + marginals -- drawn into a SubFigure.
 
     Points are colored by membership of the collision band {|DCPA| <= R, TCPA >= 0,
     optionally TCPA <= horizon}, so P[collision] is the red fraction. DCPA is signed,
     so the band straddles 0. Pass ``samples`` to reuse an existing CpaSamples.
+
+    ``tau_lim`` / ``d_lim`` override the per-figure extents with catalog-wide ones (see
+    :mod:`vo_utils.scales`), making the collision band a constant-width stripe. Samples
+    outside the frame are counted in the annotation rather than silently dropped.
     """
     rng = np.random.default_rng(0) if rng is None else rng
     m = Metrics(own, target)
@@ -361,12 +535,17 @@ def _plot_cpa_joint(subfig, own, target, Sigma_pos=None, Sigma_vel=None,
     hit = (np.abs(d) <= R) & (tau >= 0) & (True if horizon is None else tau <= horizon)
     p_hit = float(hit.mean())
 
-    # Robust limits: TCPA tails run huge at low closing speed. DCPA is signed, so
-    # frame it symmetrically about 0.
-    xlo, xhi = np.percentile(tau, [0.5, 99.5])
-    ymax = float(np.percentile(np.abs(d), 99.5))
-    xpad = 0.05 * (xhi - xlo + 1e-9)
-    xlo, xhi, ylo, yhi = xlo - xpad, xhi + xpad, -ymax * 1.05, ymax * 1.05
+    if tau_lim is not None and d_lim is not None:
+        (xlo, xhi), (ylo, yhi) = tau_lim, (-d_lim, d_lim)
+    else:
+        # Robust limits: TCPA tails run huge at low closing speed. DCPA is signed, so
+        # frame it symmetrically about 0.
+        xlo, xhi = np.percentile(tau, [0.5, 99.5])
+        ymax = float(np.percentile(np.abs(d), 99.5))
+        xpad = 0.05 * (xhi - xlo + 1e-9)
+        xlo, xhi, ylo, yhi = xlo - xpad, xhi + xpad, -ymax * 1.05, ymax * 1.05
+    imposed = tau_lim is not None and d_lim is not None
+    off = float(((tau < xlo) | (tau > xhi) | (d < ylo) | (d > yhi)).mean()) if imposed else 0.0
 
     gs = subfig.add_gridspec(2, 2, width_ratios=(4, 1), height_ratios=(1, 4),
                              wspace=0.04, hspace=0.04)
@@ -411,9 +590,12 @@ def _plot_cpa_joint(subfig, own, target, Sigma_pos=None, Sigma_vel=None,
             axm.axhline(det, color="k", ls=":", lw=1.0)
             axm.tick_params(labelleft=False); axm.set_xticks([])
 
-    ax_top.set_title(
-        rf"$(\mathrm{{TCPA}}, \mathrm{{DCPA}})$ distribution   |   "
-        rf"$P[\mathrm{{collision}}]={p_hit:.3f}$", fontsize=11.5)
+    head = title or r"$(\mathrm{TCPA}, \mathrm{DCPA})$ distribution"
+    tail = rf"   |   $P[\mathrm{{collision}}]={p_hit:.3f}$"
+    # On the common scale the wide encounters overflow; say by how much rather than
+    # letting the frame quietly hide part of the cloud.
+    tail += rf"   |   {off:.1%} off frame" if off > 0.005 else ""
+    ax_top.set_title(head + tail, fontsize=11.5)
 
 
 def three_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
@@ -457,8 +639,7 @@ def four_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
 
     ax_d = sf_dcpa.subplots()
     _plot_vo_metric(ax_d, own, target, s, s.dcpa, "DCPA [m]", Sigma_vel=Sigma_vel,
-                    k_levels=k_levels, reduce=reduce, diverging=True,
-                    symmetric=True)
+                    k_levels=k_levels, reduce=reduce, diverging=True)
     ax_d.set_title("velocity space + DCPA", fontsize=11.5)
 
     ax_t = sf_tcpa.subplots()
@@ -497,8 +678,7 @@ def six_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
 
     ax_d = sf_dcpa.subplots()
     _plot_vo_metric(ax_d, own, target, s, s.dcpa, "DCPA [m]", Sigma_vel=Sigma_vel,
-                    k_levels=k_levels, reduce=reduce, diverging=True,
-                    symmetric=True)
+                    k_levels=k_levels, reduce=reduce, diverging=True)
     ax_d.set_title("velocity space + DCPA", fontsize=11.5)
 
     ax_t = sf_tcpa.subplots()
@@ -514,6 +694,106 @@ def six_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
     _plot_cpa_joint(sf_joint, own, target, Sigma_pos, Sigma_vel, n, R, horizon, rng, samples=s)
     if title:
         fig.suptitle(title, fontsize=14, y=1.01)
+    return fig
+
+
+def nine_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
+               horizon=None, k_levels=(1.0, 2.0, 3.0), rng=None, title=None,
+               scales=None, common_scales=None, mark="hex"):
+    """Nine panels, 3x3: geometry over uncertainty over outcome.
+
+    ::
+
+        position space   | VO + DCPA (median) | VO + TCPA (median)
+        position noise   | velocity noise     | density (own-vel frame)
+        DCPA spread (IQR)| (tau, d) this scenario | (tau, d) common scale
+
+    Column-wise the four own-velocity-frame panels (row 1 cols 2-3, row 2 col 3, row 3
+    col 1) share axes and limits, so magnitude, spread and frequency can be read against
+    each other.
+
+    ``scales`` sets catalog-wide color and axis extents for the velocity-frame and noise
+    panels; None lets each panel pick its own robust percentiles. ``common_scales``
+    applies to the bottom-right (TCPA, DCPA) panel only, which exists to be comparable
+    between scenarios, and defaults to ``scales``.
+
+    ``mark`` selects how the own-velocity-frame panels draw: ``"hex"`` bins and reduces,
+    ``"scatter"`` keeps every sample (use a smaller ``n``, or the cloud fills in solid).
+    Row 3 col 1 differs between them -- IQR has no per-sample equivalent, so the scatter
+    catalog shows the collision partition there.
+    """
+    _apply_style()
+    rng = np.random.default_rng(0) if rng is None else rng
+    s = sample_cpa(own, target, Sigma_pos, Sigma_vel, n=n, rng=rng)
+    r_hat = np.asarray(target.pos, dtype=float) - np.asarray(own.pos, dtype=float)
+    v_hat = np.asarray(target.vel, dtype=float) - np.asarray(own.vel, dtype=float)
+    sc = scales
+    common = scales if common_scales is None else common_scales
+    half = None if sc is None else sc.vel_half
+
+    fig = plt.figure(figsize=(19, 18.5))
+    ((sf_pos, sf_dcpa, sf_tcpa),
+     (sf_pn, sf_vn, sf_den),
+     (sf_spread, sf_joint, sf_common)) = fig.subfigures(
+        3, 3, width_ratios=(1.0, 1.0, 1.15), wspace=0.03, hspace=0.08)
+
+    _plot_position_space(sf_pos.subplots(), own, target, Sigma_pos, k_levels)
+
+    scatter = mark == "scatter"
+    # State the aggregation on the figure rather than leaving it implied.
+    suffix = " (per sample)" if scatter else " (median)"
+
+    ax_d = sf_dcpa.subplots()
+    _plot_field(scatter, ax_d, own, target, s, s.dcpa, "DCPA [m]", Sigma_vel, k_levels,
+                half, None if sc is None else sc.dcpa)
+    ax_d.set_title(f"velocity space + DCPA{suffix}", fontsize=11.5)
+
+    ax_t = sf_tcpa.subplots()
+    _plot_field(scatter, ax_t, own, target, s, s.tcpa, "TCPA [s]", Sigma_vel, k_levels,
+                half, None if sc is None else sc.tcpa)
+    ax_t.set_title(f"velocity space + TCPA{suffix}", fontsize=11.5)
+
+    # Same half-width as the own-velocity panels: v_own = v_target - v_rel is a point
+    # reflection, so the two frames have identical spans and the clouds are comparable.
+    _plot_noise(sf_pn.subplots(), s.relpos, r_hat, Sigma_pos, "relative position (sampled)",
+                "East [m]", "North [m]", k_levels, half_width=None if sc is None else sc.pos_half)
+    _plot_noise(sf_vn.subplots(), s.relvel, v_hat, Sigma_vel, "relative velocity (sampled)",
+                r"$v_{East}$ [m/s]", r"$v_{North}$ [m/s]", k_levels, half_width=half)
+
+    ax_den = sf_den.subplots()
+    if scatter:
+        # One flat color: the only varying channel is how many marks overlap.
+        _plot_vo_scatter(ax_den, own, target, s, values=None, Sigma_vel=Sigma_vel,
+                         k_levels=k_levels, half_width=half)
+    else:
+        _plot_density(ax_den, own, target, s, Sigma_vel=Sigma_vel, k_levels=k_levels,
+                      half_width=half)
+    ax_den.set_title("velocity space + density", fontsize=11.5)
+
+    ax_sp = sf_spread.subplots()
+    if scatter:
+        # An IQR has no per-sample equivalent, so the scatter catalog shows the
+        # collision partition here instead -- the sampled PVO.
+        _, p_hit = _plot_vo_outcome(ax_sp, own, target, s,
+                                    Metrics(own, target).safety_radius if R is None else R,
+                                    horizon=horizon, Sigma_vel=Sigma_vel,
+                                    k_levels=k_levels, half_width=half)
+        ax_sp.set_title(rf"velocity space + collision outcome   |   "
+                        rf"$P={p_hit:.3f}$", fontsize=11.5)
+    else:
+        _plot_vo_metric(ax_sp, own, target, s, s.dcpa, "DCPA IQR [m]", Sigma_vel=Sigma_vel,
+                        k_levels=k_levels, reduce=iqr, diverging=False, half_width=half,
+                        clim=None if sc is None else sc.spread_dcpa)
+        ax_sp.set_title("velocity space + DCPA spread (IQR)", fontsize=11.5)
+
+    _plot_cpa_joint(sf_joint, own, target, Sigma_pos, Sigma_vel, n, R, horizon, rng,
+                    samples=s, title=r"$(\mathrm{TCPA}, \mathrm{DCPA})$, own scale")
+    _plot_cpa_joint(sf_common, own, target, Sigma_pos, Sigma_vel, n, R, horizon, rng,
+                    samples=s, title=r"$(\mathrm{TCPA}, \mathrm{DCPA})$, common scale",
+                    tau_lim=None if common is None else common.tau_lim,
+                    d_lim=None if common is None else common.d_lim)
+    if title:
+        fig.suptitle(title, fontsize=14, y=1.005)
     return fig
 
 

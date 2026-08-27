@@ -10,7 +10,11 @@
 
 /vo_utils/__pycache__
 /vo_utils/tests
-/scripts
+# scripts/ stays out of the module, except the figures that ship with the paper.
+# Must be /scripts/* not /scripts: git does not descend into an excluded
+# directory, so a negation inside one never gets a chance to match.
+/scripts/*
+!/scripts/scenario_grid.py
 
 # packaging (editable install / build)
 *.egg-info/
