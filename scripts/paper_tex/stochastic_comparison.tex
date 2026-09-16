@@ -1,0 +1,112 @@
+% stochastic_comparison.tex -- the controlled pair under fixed noise (Sec. 5).
+%
+% One layout for both noise models; choose the data set before inputting:
+%   \begin{figure*}[t] \centering
+%     \def\vostochdata{stochastic_gaussian}\input{figures/stochastic_comparison}
+%   \caption{...} \end{figure*}
+% and \def\vostochdata{stochastic_uniform_ellipse} for the bounded-noise version.
+% Edit freely:   sizes, titles, labels, legend  -> this file
+%                colors, marks, line styles     -> vo_style.tex (shared)
+% Regenerated:   <data set>/values.tex, samples.csv, histograms.csv (don't edit)
+% Data: samples.csv has one row per sample; code = 10*row + collision (10/11 = crossing row,
+%   20/21 = second row; units digit 1 = collision). histograms.csv holds the pre-binned
+%   marginals; group = 10*row + variable (0 = TCPA, 1 = DCPA).
+\providecommand{\vofigdir}{figures}
+\providecommand{\vostochdata}{stochastic_gaussian}
+\ifdefined\vostyleloaded\else\input{\vofigdir/vo_style}\fi
+\begin{tikzpicture}
+\input{\vofigdir/\vostochdata/values}
+\def\dir{\vofigdir/\vostochdata}
+% ---- sizes -----------------------------------------------------------------------
+% Panels are positioned relative to each other with calc, as at={($(jA.south west)+(0,-\rowgap)$)}.
+% Use that form when moving them: xshift/yshift in an axis's at= has no effect.
+\def\jointW{0.40\textwidth}   % (TCPA, DCPA) scatter
+\def\jointH{0.25\textwidth}
+\def\marginal{0.06\textwidth} % histogram strips
+\def\velW{0.29\textwidth}     % velocity panel (square)
+\def\velgap{1.35cm}           % between the right histogram and the velocity panel
+\def\rowgap{3.0cm}            % between the two rows
+
+% ======== row A ==================================================================
+\begin{axis}[vo/axis, name=jA, width=\jointW, height=\jointH, scale only axis,
+    xmin=\rowAjxmin, xmax=\rowAjxmax, ymin=\rowAjymin, ymax=\rowAjymax,
+    xlabel={$\TCPA$ [s]}, ylabel={$\DCPA$ [m]}]
+  \fill[vo band, on layer=axis background] (axis cs:0,-\rowAR) rectangle (axis cs:\rowAjxmax,\rowAR);
+  \draw[vo zero] ({rel axis cs:0,0} |- {axis cs:0,0}) -- ({rel axis cs:1,0} |- {axis cs:0,0});
+  \draw[vo rline] ({rel axis cs:0,0} |- {axis cs:0,\rowAR}) -- ({rel axis cs:1,0} |- {axis cs:0,\rowAR});
+  \draw[vo rline] ({rel axis cs:0,0} |- {axis cs:0,-\rowAR}) -- ({rel axis cs:1,0} |- {axis cs:0,-\rowAR});
+  \addplot[vo/fail, restrict expr to domain={\thisrow{code}}{9.5:10.5}, restrict x to domain=\rowAjxmin:\rowAjxmax, restrict y to domain=\rowAjymin:\rowAjymax] table[x=tcpa, y=dcpa] {\dir/samples.csv};
+  \addplot[vo/hold, restrict expr to domain={\thisrow{code}}{10.5:11.5}, restrict x to domain=\rowAjxmin:\rowAjxmax, restrict y to domain=\rowAjymin:\rowAjymax] table[x=tcpa, y=dcpa] {\dir/samples.csv};
+  \addplot[vo/cpa] coordinates {(\rowAtcpa,\rowAdcpa)};
+\end{axis}
+\begin{axis}[vo/marginal, name=tA, at={($(jA.north west)+(0,2pt)$)}, anchor=south west,
+    width=\jointW, height=\marginal, scale only axis, xmin=\rowAjxmin, xmax=\rowAjxmax, ymin=0,
+    title={\rowAname: nominal $\TCPA = \rowAntcpa$~s, $\DCPA = \rowAndcpa$~m (\rowAverdict)}]
+  \addplot[vo/hist, ybar interval, restrict expr to domain={\thisrow{group}}{9.5:10.5}] table[x=edge, y=density] {\dir/histograms.csv};
+  \draw[vo detline] ({axis cs:\rowAtcpa,0} |- {rel axis cs:0,0}) -- ({axis cs:\rowAtcpa,0} |- {rel axis cs:0,1});
+\end{axis}
+\begin{axis}[vo/marginal, name=mA, at={($(jA.south east)+(2pt,0)$)}, anchor=south west,
+    width=\marginal, height=\jointH, scale only axis, xmin=0, ymin=\rowAjymin, ymax=\rowAjymax]
+  \addplot[vo/hist, xbar interval, restrict expr to domain={\thisrow{group}}{10.5:11.5}] table[x=density, y=edge] {\dir/histograms.csv};
+  \draw[vo detline] ({rel axis cs:0,0} |- {axis cs:0,\rowAdcpa}) -- ({rel axis cs:1,0} |- {axis cs:0,\rowAdcpa});
+\end{axis}
+\begin{axis}[vo/axis, name=vA, at={($(mA.east)+(\velgap,0)$)}, anchor=west,
+    width=\velW, scale only axis, axis equal image,
+    xmin=\rowAvxmin, xmax=\rowAvxmax, ymin=\rowAvymin, ymax=\rowAvymax,
+    xlabel={$v_{\mathrm{East}}$ [m/s]}, ylabel={$v_{\mathrm{North}}$ [m/s]},
+    title={$P[\text{collision}] = \rowAP$}]
+  \addplot[vo/fail, restrict expr to domain={\thisrow{code}}{9.5:10.5}, restrict x to domain=\rowAvxmin:\rowAvxmax, restrict y to domain=\rowAvymin:\rowAvymax] table[x=vE, y=vN] {\dir/samples.csv};
+  \addplot[vo/hold, restrict expr to domain={\thisrow{code}}{10.5:11.5}, restrict x to domain=\rowAvxmin:\rowAvxmax, restrict y to domain=\rowAvymin:\rowAvymax] table[x=vE, y=vN] {\dir/samples.csv};
+  \draw[vo cone] (\rowAapexX,\rowAapexY) -- (\rowAconeOneX,\rowAconeOneY);
+  \draw[vo cone] (\rowAapexX,\rowAapexY) -- (\rowAconeTwoX,\rowAconeTwoY);
+  \addplot[vo/apex] coordinates {(\rowAapexX,\rowAapexY)};
+  \addplot[vo/ego] coordinates {(\rowAownX,\rowAownY)};
+\end{axis}
+
+% ======== row B ==================================================================
+\begin{axis}[vo/axis, name=jB, at={($(jA.south west)+(0,-\rowgap)$)}, anchor=north west,
+    width=\jointW, height=\jointH, scale only axis,
+    xmin=\rowBjxmin, xmax=\rowBjxmax, ymin=\rowBjymin, ymax=\rowBjymax,
+    xlabel={$\TCPA$ [s]}, ylabel={$\DCPA$ [m]}]
+  \fill[vo band, on layer=axis background] (axis cs:0,-\rowBR) rectangle (axis cs:\rowBjxmax,\rowBR);
+  \draw[vo zero] ({rel axis cs:0,0} |- {axis cs:0,0}) -- ({rel axis cs:1,0} |- {axis cs:0,0});
+  \draw[vo rline] ({rel axis cs:0,0} |- {axis cs:0,\rowBR}) -- ({rel axis cs:1,0} |- {axis cs:0,\rowBR});
+  \draw[vo rline] ({rel axis cs:0,0} |- {axis cs:0,-\rowBR}) -- ({rel axis cs:1,0} |- {axis cs:0,-\rowBR});
+  \addplot[vo/fail, restrict expr to domain={\thisrow{code}}{19.5:20.5}, restrict x to domain=\rowBjxmin:\rowBjxmax, restrict y to domain=\rowBjymin:\rowBjymax] table[x=tcpa, y=dcpa] {\dir/samples.csv};
+  \addplot[vo/hold, restrict expr to domain={\thisrow{code}}{20.5:21.5}, restrict x to domain=\rowBjxmin:\rowBjxmax, restrict y to domain=\rowBjymin:\rowBjymax] table[x=tcpa, y=dcpa] {\dir/samples.csv};
+  \addplot[vo/cpa] coordinates {(\rowBtcpa,\rowBdcpa)};
+\end{axis}
+\begin{axis}[vo/marginal, name=tB, at={($(jB.north west)+(0,2pt)$)}, anchor=south west,
+    width=\jointW, height=\marginal, scale only axis, xmin=\rowBjxmin, xmax=\rowBjxmax, ymin=0,
+    title={\rowBname: nominal $\TCPA = \rowBntcpa$~s, $\DCPA = \rowBndcpa$~m (\rowBverdict)}]
+  \addplot[vo/hist, ybar interval, restrict expr to domain={\thisrow{group}}{19.5:20.5}] table[x=edge, y=density] {\dir/histograms.csv};
+  \draw[vo detline] ({axis cs:\rowBtcpa,0} |- {rel axis cs:0,0}) -- ({axis cs:\rowBtcpa,0} |- {rel axis cs:0,1});
+\end{axis}
+\begin{axis}[vo/marginal, name=mB, at={($(jB.south east)+(2pt,0)$)}, anchor=south west,
+    width=\marginal, height=\jointH, scale only axis, xmin=0, ymin=\rowBjymin, ymax=\rowBjymax]
+  \addplot[vo/hist, xbar interval, restrict expr to domain={\thisrow{group}}{20.5:21.5}] table[x=density, y=edge] {\dir/histograms.csv};
+  \draw[vo detline] ({rel axis cs:0,0} |- {axis cs:0,\rowBdcpa}) -- ({rel axis cs:1,0} |- {axis cs:0,\rowBdcpa});
+\end{axis}
+\begin{axis}[vo/axis, name=vB, at={($(mB.east)+(\velgap,0)$)}, anchor=west,
+    width=\velW, scale only axis, axis equal image,
+    xmin=\rowBvxmin, xmax=\rowBvxmax, ymin=\rowBvymin, ymax=\rowBvymax,
+    xlabel={$v_{\mathrm{East}}$ [m/s]}, ylabel={$v_{\mathrm{North}}$ [m/s]},
+    title={$P[\text{collision}] = \rowBP$}]
+  \addplot[vo/fail, restrict expr to domain={\thisrow{code}}{19.5:20.5}, restrict x to domain=\rowBvxmin:\rowBvxmax, restrict y to domain=\rowBvymin:\rowBvymax] table[x=vE, y=vN] {\dir/samples.csv};
+  \addplot[vo/hold, restrict expr to domain={\thisrow{code}}{20.5:21.5}, restrict x to domain=\rowBvxmin:\rowBvxmax, restrict y to domain=\rowBvymin:\rowBvymax] table[x=vE, y=vN] {\dir/samples.csv};
+  \draw[vo cone] (\rowBapexX,\rowBapexY) -- (\rowBconeOneX,\rowBconeOneY);
+  \draw[vo cone] (\rowBapexX,\rowBapexY) -- (\rowBconeTwoX,\rowBconeTwoY);
+  \addplot[vo/apex] coordinates {(\rowBapexX,\rowBapexY)};
+  \addplot[vo/ego] coordinates {(\rowBownX,\rowBownY)};
+\end{axis}
+
+% ---- legend ----------------------------------------------------------------------
+\node[anchor=north, font=\scriptsize, yshift=-2pt] at (current bounding box.south) {%
+  \tikz[baseline=-0.6ex]\fill[colorSafe] (0,0) circle (2pt);~no collision\quad
+  \tikz[baseline=-0.6ex]\fill[colorRisk] (0,0) circle (2pt);~collision\quad
+  \tikz[baseline=-0.6ex]\draw[vo rline] (0,0) -- (5mm,0);~$|\DCPA| = R$\quad
+  \tikz[baseline=-0.6ex]\fill[black] (0,0) circle (1.4pt);~nominal CPA\quad
+  \tikz[baseline=-0.6ex]\draw[vo cone] (0,0) -- (5mm,0);~nominal VO\quad
+  \tikz[baseline=-0.6ex]\fill[colorB] (-1.8pt,-1.8pt) rectangle (1.8pt,1.8pt);~$\mathbf{v}_O$\quad
+  \tikz[baseline=-0.6ex]\fill[colorA] (0,0) circle (1.8pt);~$\mathbf{v}_E$};
+\end{tikzpicture}

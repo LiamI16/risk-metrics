@@ -1,0 +1,73 @@
+% vo_style.tex -- shared look for the paper's data figures (Sec. 5).
+% Each figure loads this automatically. Edit here to restyle every figure at once.
+%
+% Compile with LuaLaTeX (Overleaf: Menu -> Compiler -> LuaLaTeX).
+% The paper preamble needs, once:
+%   \usepackage[T1]{fontenc}   % without it LuaLaTeX sets the whole paper in Latin Modern, not Times
+%   \usepackage{pgfplots}
+%   \usepgfplotslibrary{groupplots}
+%   \pgfplotsset{compat=1.18}
+\def\vostyleloaded{}
+\usetikzlibrary{calc}   % figure layouts offset axes with ($(a)+(x,y)$)
+
+% ---- Colors: the Fig. 1 palette -------------------------------------------------------
+% \providecolor keeps Fig. 1's own definitions if they are loaded first.
+\providecolor{colorA}{RGB}{30,120,200}     % ego E
+\providecolor{colorB}{RGB}{220,160,0}      % obstacle O
+\providecolor{colorRisk}{RGB}{200,30,30}   % risk: collision / condition holds
+\providecolor{colorSafe}{RGB}{44,160,44}   % safe: no collision / condition fails
+
+% ---- Sample marks ----------------------------------------------------------------------
+% Fill-only marks: the built-in mark=* and square* also stroke an outline, which is wider
+% than the mark at this size.
+\pgfdeclareplotmark{vosquare}{%
+  \pgfpathrectangle{\pgfpoint{-\pgfplotmarksize}{-\pgfplotmarksize}}%
+                   {\pgfpoint{2\pgfplotmarksize}{2\pgfplotmarksize}}\pgfusepathqfill}
+\pgfdeclareplotmark{vodot}{\pgfpathcircle{\pgfpointorigin}{\pgfplotmarksize}\pgfusepathqfill}
+% Circles by default. They need LuaLaTeX: pdfLaTeX's fixed memory runs out above ~3k circle
+% marks per panel. Under pdfLaTeX use squares instead:  \renewcommand{\vomark}{vosquare}
+\providecommand{\vomark}{vodot}
+\providecommand{\vomarksize}{0.5pt}
+\providecommand{\vomarkopacity}{0.6}
+
+\pgfplotsset{
+  vo/axis/.style={
+    set layers, table/col sep=comma,
+    tick label style={font=\scriptsize}, label style={font=\small}, title style={font=\small},
+    grid=major, grid style={draw=black!10, line width=0.3pt},
+  },
+  vo/marginal/.style={vo/axis, xtick=\empty, ytick=\empty, grid=none},
+  vo/marks/.style={only marks, mark=\vomark, mark size=\vomarksize, opacity=\vomarkopacity},
+  % Sample classes. The numbered variants shade by magnitude: 0 = smallest (base color)
+  % to 3 = largest (darkest).
+  vo/hold/.style={vo/marks, color=colorRisk},
+  vo/hold 0/.style={vo/marks, color=colorRisk!94!black},
+  vo/hold 1/.style={vo/marks, color=colorRisk!81!black},
+  vo/hold 2/.style={vo/marks, color=colorRisk!69!black},
+  vo/hold 3/.style={vo/marks, color=colorRisk!56!black},
+  vo/fail/.style={vo/marks, color=colorSafe},
+  vo/fail 0/.style={vo/marks, color=colorSafe!94!black},
+  vo/fail 1/.style={vo/marks, color=colorSafe!81!black},
+  vo/fail 2/.style={vo/marks, color=colorSafe!69!black},
+  vo/fail 3/.style={vo/marks, color=colorSafe!56!black},
+  % Markers
+  vo/apex/.style={only marks, mark=square*, mark size=1.8pt, color=colorB},
+  vo/ego/.style={only marks, mark=*, mark size=1.8pt, color=colorA},
+  vo/cpa/.style={only marks, mark=*, mark size=1.4pt, color=black},
+  vo/twin hold/.style={only marks, mark=*, mark size=2.4pt, fill=colorRisk, draw=black, line width=0.5pt},
+  vo/twin fail/.style={only marks, mark=*, mark size=2.4pt, fill=colorSafe, draw=black, line width=0.5pt},
+  % Marginal histograms
+  vo/hist/.style={draw=none, fill=black!45, fill opacity=0.65},
+}
+
+% ---- Lines and annotations (TikZ styles, for \draw and \node inside axes) ----------------
+\tikzset{
+  vo boundary/.style={draw=black!40, line width=0.9pt},            % a criterion's boundary
+  vo tangent/.style={draw=black, line width=0.6pt, dash pattern=on 3pt off 2pt},
+  vo cone/.style={draw=black, line width=0.9pt},                   % deterministic VO
+  vo band/.style={fill=colorRisk, fill opacity=0.08},              % collision band
+  vo rline/.style={draw=colorRisk, line width=0.6pt, dash pattern=on 3pt off 2pt},
+  vo zero/.style={draw=black!45, line width=0.4pt},
+  vo detline/.style={draw=black, line width=0.6pt, dash pattern=on 1pt off 1.5pt},
+  vo label/.style={font=\scriptsize, fill=white, inner sep=1pt},
+}

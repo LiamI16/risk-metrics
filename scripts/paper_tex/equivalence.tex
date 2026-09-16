@@ -1,0 +1,87 @@
+% equivalence.tex -- Theorem 1 as a set identity in own-velocity space (Sec. 5).
+%
+% In root.tex:   \begin{figure*}[t] \centering \input{figures/equivalence} \caption{...} \end{figure*}
+% Edit freely:   sizes, titles, labels, legend  -> this file
+%                colors, marks, line styles     -> vo_style.tex (shared)
+% Regenerated:   equivalence/values.tex and equivalence/samples.csv (don't edit)
+% Data: samples.csv has one row per sample. code_a/b/c is that sample's class in panel a/b/c:
+%   0-3 = condition fails, 10-13 = condition holds; the units digit is the shade level.
+%   Each \addplot below keeps one code with restrict expr to domain.
+\providecommand{\vofigdir}{figures}
+\ifdefined\vostyleloaded\else\input{\vofigdir/vo_style}\fi
+\begin{tikzpicture}
+\input{\vofigdir/equivalence/values}
+\def\dir{\vofigdir/equivalence}
+\def\panelwidth{0.29\textwidth}   % each of the three panels
+\begin{groupplot}[
+    vo/axis,
+    group style={group size=3 by 1, horizontal sep=0.45cm, y descriptions at=edge left},
+    width=\panelwidth, scale only axis, axis equal image,
+    xmin=\xmin, xmax=\xmax, ymin=\ymin, ymax=\ymax,
+    xlabel={$v_{\mathrm{East}}$ [m/s]}, ylabel={$v_{\mathrm{North}}$ [m/s]},
+  ]
+
+  % ---- (a) DCPA <= R: a bowtie ---------------------------------------------------
+  \nextgroupplot[title={(a) $\DCPA \leq R$}]
+    \addplot[vo/fail 0, restrict expr to domain={\thisrow{code_a}}{-0.5:0.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 1, restrict expr to domain={\thisrow{code_a}}{0.5:1.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 2, restrict expr to domain={\thisrow{code_a}}{1.5:2.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 3, restrict expr to domain={\thisrow{code_a}}{2.5:3.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 0, restrict expr to domain={\thisrow{code_a}}{9.5:10.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 1, restrict expr to domain={\thisrow{code_a}}{10.5:11.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 2, restrict expr to domain={\thisrow{code_a}}{11.5:12.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 3, restrict expr to domain={\thisrow{code_a}}{12.5:13.5}] table[x=x, y=y] {\dir/samples.csv};
+    \draw[vo boundary] (\bowOneAx,\bowOneAy) -- (\bowOneBx,\bowOneBy);
+    \draw[vo boundary] (\bowTwoAx,\bowTwoAy) -- (\bowTwoBx,\bowTwoBy);
+    \addplot[vo/apex] coordinates {(\apexX,\apexY)};
+    \addplot[vo/twin hold] coordinates {(\apprX,\apprY)};
+    \addplot[vo/twin hold] coordinates {(\recX,\recY)};
+    \coordinate (aAppr) at (axis cs:\apprX,\apprY);   % labeled after the panels
+    \coordinate (aRec)  at (axis cs:\recX,\recY);
+
+  % ---- (b) TCPA > 0: a half-plane ------------------------------------------------
+  \nextgroupplot[title={(b) $\TCPA > 0$}]
+    \addplot[vo/fail 0, restrict expr to domain={\thisrow{code_b}}{-0.5:0.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 1, restrict expr to domain={\thisrow{code_b}}{0.5:1.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 2, restrict expr to domain={\thisrow{code_b}}{1.5:2.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/fail 3, restrict expr to domain={\thisrow{code_b}}{2.5:3.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 0, restrict expr to domain={\thisrow{code_b}}{9.5:10.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 1, restrict expr to domain={\thisrow{code_b}}{10.5:11.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 2, restrict expr to domain={\thisrow{code_b}}{11.5:12.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 3, restrict expr to domain={\thisrow{code_b}}{12.5:13.5}] table[x=x, y=y] {\dir/samples.csv};
+    \draw[vo boundary] (\tcpaAx,\tcpaAy) -- (\tcpaBx,\tcpaBy);
+    \addplot[vo/apex] coordinates {(\apexX,\apexY)};
+    \addplot[vo/twin hold] coordinates {(\apprX,\apprY)};
+    \addplot[vo/twin fail] coordinates {(\recX,\recY)};
+    \coordinate (bAppr) at (axis cs:\apprX,\apprY);
+    \coordinate (bRec)  at (axis cs:\recX,\recY);
+
+  % ---- (c) both = the VO ---------------------------------------------------------
+  \nextgroupplot[title={(c) both $= \VO_{E|O}$}]
+    \addplot[vo/fail 0, restrict expr to domain={\thisrow{code_c}}{-0.5:0.5}] table[x=x, y=y] {\dir/samples.csv};
+    \addplot[vo/hold 0, restrict expr to domain={\thisrow{code_c}}{9.5:10.5}] table[x=x, y=y] {\dir/samples.csv};
+    % the predicate's boundary, overlaid with the independent tangent construction
+    \draw[vo boundary] (\apexX,\apexY) -- (\coneOneX,\coneOneY);
+    \draw[vo boundary] (\apexX,\apexY) -- (\coneTwoX,\coneTwoY);
+    \draw[vo tangent]  (\apexX,\apexY) -- (\coneOneX,\coneOneY);
+    \draw[vo tangent]  (\apexX,\apexY) -- (\coneTwoX,\coneTwoY);
+    \addplot[vo/apex] coordinates {(\apexX,\apexY)};
+    \addplot[vo/twin hold] coordinates {(\apprX,\apprY)};
+    \addplot[vo/twin fail] coordinates {(\recX,\recY)};
+\end{groupplot}
+
+% ---- twin-pair labels -------------------------------------------------------------
+% Drawn after the panels, so each label's white box covers the marks beneath it.
+\node[vo label, text=colorRisk, anchor=north east, xshift=-3pt, yshift=-3pt] at (aAppr) {$\DCPA = \apprDcpa$~m};
+\node[vo label, text=colorRisk, anchor=south west, xshift=3pt,  yshift=3pt]  at (aRec)  {$\DCPA = \recDcpa$~m};
+\node[vo label, text=colorRisk, anchor=north east, xshift=-3pt, yshift=-3pt] at (bAppr) {$\TCPA = \apprTcpa$~s};
+\node[vo label, text=colorSafe, anchor=south west, xshift=3pt,  yshift=3pt]  at (bRec)  {$\TCPA = \recTcpa$~s};
+
+% ---- legend ----------------------------------------------------------------------
+\node[anchor=north, font=\scriptsize, yshift=-3pt] at (group c2r1.outer south) {%
+  \tikz[baseline=-0.6ex]\fill[colorB] (-1.8pt,-1.8pt) rectangle (1.8pt,1.8pt);~$\mathbf{v}_O$ (apex)\quad
+  \tikz[baseline=-0.6ex]\fill[colorRisk] (0,0) circle (2pt);~condition holds\quad
+  \tikz[baseline=-0.6ex]\fill[colorSafe] (0,0) circle (2pt);~condition fails\quad
+  \tikz[baseline=-0.6ex]\draw[vo tangent] (0,0) -- (5mm,0);~tangent construction\quad
+  shade: darker $=$ larger magnitude};
+\end{tikzpicture}
