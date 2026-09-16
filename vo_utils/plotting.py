@@ -6,10 +6,10 @@ from matplotlib.patches import Polygon as _Polygon, Rectangle as _Rectangle
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 from matplotlib.lines import Line2D
 
-from minkowski_utils import MinkowskiSum, Circle, Shape
+from minkowski_utils import MinkowskiSum, Shape
 from minkowski_utils.plotting import plot_shape
 from .cone import collision_cone
-from .metrics import Metrics
+from .metrics import Metrics, cpa_fields, collides
 from .obstacle import VelocityObstacle, config_space_obstacle
 from .uncertainty import probabilistic_collision_cone, covariance_ellipse, SigmaCone
 from .uncertainty_models import (
@@ -35,6 +35,16 @@ SCATTER_EDGE_LW = 0.3
 SCATTER_EDGE_COLOR = "#000000"
 
 OUTCOME_COLORS = ("#2ca02c", "#d62728")   # (safe, collision) -- as in _plot_cpa_joint
+
+# Magnitude ramps for the equivalence scatter: each starts at its OUTCOME_COLORS hue and
+# only darkens, so the classification still reads at a glance and shade adds the metric's
+# size on top of it. Two stops, so no neutral to mis-center.
+# The dark end stops well short of black: past roughly half the luminance the hue stops
+# reading, and the classification matters more than the magnitude riding on it.
+_RAMP_FAIL = LinearSegmentedColormap.from_list("vo_mag_fail", ["#2ca02c", "#14561a"])
+_RAMP_HOLD = LinearSegmentedColormap.from_list("vo_mag_hold", ["#d62728", "#6e1213"])
+_MAG_Q = (5.0, 95.0)      # per-class percentiles the ramp spans
+
 
 # ---- Colormaps ----
 # Metric-field colormaps: orange = positive, blue = negative, white = zero, in every panel.
@@ -426,10 +436,11 @@ def _vo_overlay(ax, own, target, Sigma_vel, k_levels):
     # off-frame) origin would shoot off the plot.
     ax.plot(*target.vel, "s", color="#1f77b4", ms=7)     # apex = v_target
     ax.plot(*own.vel, "o", color="k", ms=7)              # v_own
-    lvl_label = "bounded VO" if _is_bounded(Sigma_vel) else r"$k\sigma$ VO"
-    ax.legend(handles=[Line2D([], [], color="k", lw=1.8, ls="-", label="deterministic VO"),
-                       Line2D([], [], color="k", lw=0.9, ls="--", label=lvl_label)],
-              loc="lower left", fontsize=7.5, framealpha=0.85)
+    handles = [Line2D([], [], color="k", lw=1.8, ls="-", label="deterministic VO")]
+    if _is_active(Sigma_vel):        # no level sets drawn => do not key them
+        lvl_label = "bounded VO" if _is_bounded(Sigma_vel) else r"$k\sigma$ VO"
+        handles.append(Line2D([], [], color="k", lw=0.9, ls="--", label=lvl_label))
+    ax.legend(handles=handles, loc="lower left", fontsize=7.5, framealpha=0.85)
     return frame
 
 
@@ -794,6 +805,353 @@ def nine_panel(own, target, Sigma_pos=None, Sigma_vel=None, n=20000, R=None,
                     d_lim=None if common is None else common.d_lim)
     if title:
         fig.suptitle(title, fontsize=14, y=1.005)
+    return fig
+
+
+def _cpa_fields(v_grid, relpos, v_target):
+    """(TCPA, unsigned DCPA) of candidate OWN velocities against a target.
+
+    Adapter over :func:`vo_utils.metrics.cpa_fields`, which is stated in terms of the
+    relative pair. A candidate own velocity has relative velocity ``w = v_target - v_own``,
+    so a grid over own-velocity space is a point reflection of one over relative-velocity
+    space.
+    """
+    p = np.asarray(relpos, dtype=float)
+    w = np.asarray(v_target, dtype=float) - np.asarray(v_grid, dtype=float)
+    tcpa, dcpa_s = cpa_fields(np.broadcast_to(p, w.shape), w)
+    return tcpa, np.abs(dcpa_s)
+
+
+def _frame(points, pad_frac=0.25):
+    """Square (center, half-width) framing ``points``."""
+    P = np.asarray(points, dtype=float)
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    c = 0.5 * (lo + hi)
+    half = max(0.5 * float((hi - lo).max()) * (1 + pad_frac), 1e-6)
+    return c, half
+
+
+def _fill_region(ax, VX, VY, mask, color, alpha, label=None, fill=True):
+    """Shade a boolean region and outline its boundary (vector-friendly).
+
+    ``fill=False`` draws the boundary only, for panels where a scatter already carries
+    the region and a wash behind it would only mute the marks.
+    """
+    if fill:
+        ax.contourf(VX, VY, mask.astype(float), levels=[0.5, 1.5],
+                    colors=[color], alpha=alpha)
+    ax.contour(VX, VY, mask.astype(float), levels=[0.5], colors=[color], linewidths=1.4)
+    if label is not None:                       # proxy artist, contourf has no handle
+        ax.plot([], [], "s", color=color, alpha=max(alpha, 0.35), ms=9, label=label)
+
+
+def _vo_membership(v_grid, relpos, v_target, R):
+    """The LHS of Theorem 1 for candidate own velocities: is there a ``t >= 0`` with collision?
+
+    Adapter over :func:`vo_utils.metrics.collides`, which solves the quadratic directly.
+    Ground truth for the numerical demonstration: it must not route through TCPA/DCPA, or
+    the theorem would be assumed rather than tested.
+    """
+    p = np.asarray(relpos, dtype=float)
+    w = np.asarray(v_target, dtype=float) - np.asarray(v_grid, dtype=float)
+    return collides(np.broadcast_to(p, w.shape), w, R)
+
+
+def class_limits(values, holds, q=_MAG_Q):
+    """``(lo, hi)`` per class -- fails first -- spanning where that class's values sit.
+
+    Module level and public because the TikZ export has to reproduce the figure's shading
+    exactly; recomputing percentiles on its own side would let the two drift.
+    """
+    return tuple(tuple(np.percentile(values[sel], q)) if sel.any() else (0.0, 1.0)
+                 for sel in (~holds, holds))
+
+
+def _frame_samples(c, half, n, rng):
+    """``n`` candidate velocities uniform on the square frame the panels show.
+
+    The frame is the one the region-only variant already uses, so the two variants stay
+    directly comparable and the scatter fills the panel instead of an inscribed shape.
+    An earlier version drew from a speed disc ``||v_E|| <= v_max``; that bound was no more
+    principled than the frame once the flagged fractions came off the axes, and it cost
+    the cone panel real estate.
+    """
+    c = np.asarray(c, dtype=float)
+    return rng.uniform(c - half, c + half, size=(n, 2))
+
+
+def equivalence_figure(own, target, v_conflict, v_safe, grid_n=700, pad_frac=0.25,
+                       n_samples=None, seed=0, mark_size=3.0):
+    """Theorem 1 as a set identity in own-velocity space.
+
+    Decomposes the infinite-horizon VO into its two CPA predicates and shows their
+    intersection is the collision cone:
+
+    * ``DCPA <= R`` is homogeneous in the relative velocity and invariant under
+      ``w -> -w``, since it measures the distance from the collision disc to the *line*
+      through ``p_rel`` along ``w``. Its region is a **bowtie** -- the collision cone
+      together with its mirror lobe.
+    * ``TCPA > 0`` is ``p_rel . w < 0``, a **half-plane** through the apex. In own-velocity
+      space this flips to ``p_rel . v_own > p_rel . v_target``: own velocities with a
+      positive component along the line of sight.
+    * Their intersection is the cone.
+
+    ``v_conflict`` and ``v_safe`` are drawn as markers. Passing a time-reversed twin pair
+    (relative velocities ``w`` and ``-w``) gives two velocities of *identical* DCPA and
+    opposite-sign TCPA, one per lobe: DCPA alone cannot separate them, the VO does.
+
+    With ``n_samples``, candidate velocities are additionally drawn uniformly over the
+    frame and colored by each panel's criterion. The twin pair is a proof by example; the
+    population shows the effect is generic rather than a cherry-picked pair. Error counts
+    belong in the caption rather than on the axes.
+
+    The regions are evaluated on a grid from the CPA definitions, and the analytic cone
+    from the tangent construction is overlaid in panel (c); the two agree by Theorem 1.
+
+    Parameters
+    ----------
+    own, target : Ship
+        The two ships. Disc domains, and the encounter must satisfy ``||p_rel|| > R``
+        (Corollary 1); otherwise the VO is all of R^2 and the figure is degenerate.
+    v_conflict, v_safe : array_like, shape (2,)
+        The two candidate own velocities to mark.
+    grid_n : int
+        Samples per axis of the predicate grid.
+    pad_frac : float
+        Padding around the marked velocities; also sets the sampling window.
+    n_samples : int, optional
+        Candidate velocities to scatter. None draws the twin pair alone.
+    seed : int
+        Seed for the candidate-velocity draw.
+    mark_size : float
+        Area of each scattered candidate mark. Larger reads better at low ``n_samples``
+        and saturates at high ``n_samples``; the two trade off, so it is worth eyeballing
+        the pair together.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _apply_style()
+    p = np.asarray(target.pos, dtype=float) - np.asarray(own.pos, dtype=float)
+    R = own.domain.r + target.domain.r
+    if np.linalg.norm(p) <= R:
+        raise ValueError("||p_rel|| <= R: the agents already overlap, so the VO is all "
+                         "of R^2 (the second disjunct of Theorem 1) and the "
+                         "decomposition has nothing to show.")
+    v_conflict = np.asarray(v_conflict, dtype=float)
+    v_safe = np.asarray(v_safe, dtype=float)
+
+    c, half = _frame([(0.0, 0.0), target.vel, v_conflict, v_safe], pad_frac)
+    pts = (None if n_samples is None else
+           _frame_samples(c, half, n_samples, np.random.default_rng(seed)))
+    ax_lin = [np.linspace(c[i] - half, c[i] + half, grid_n) for i in (0, 1)]
+    VX, VY = np.meshgrid(*ax_lin)
+    tcpa, dcpa = _cpa_fields(np.stack([VX, VY], axis=-1), p, target.vel)
+    m_d, m_t = dcpa <= R, tcpa > 0
+
+    # The twin pair's own metrics, so each panel can label the quantity it is about.
+    tau_pair, d_pair = _cpa_fields(np.stack([v_conflict, v_safe]), p, target.vel)
+
+    # Each panel colors the markers by ITS OWN criterion, not by the final verdict: both
+    # velocities are flagged in (a), only one in (b) and (c). That is the story -- DCPA
+    # alone condemns a receding velocity, TCPA is what discriminates.
+    held_d, held_t = d_pair <= R, tau_pair > 0
+
+    # Per-panel criterion at the scattered candidates, for coloring and for the fractions.
+    held_pts = [None, None, None]
+    if pts is not None:
+        tau_s, d_s = _cpa_fields(pts, p, target.vel)
+        s_d, s_t = d_s <= R, tau_s > 0
+        held_pts = [s_d, s_t, s_d & s_t]
+
+    # One neutral color for all three criterion boundaries. They are the same kind of
+    # object in every panel -- the level set of that panel's condition -- so a per-panel
+    # hue implied a distinction that does not exist, and it competed with the marks:
+    # (a)'s orange sat against the red "holds" class, (c)'s was the red class's own hue.
+    # Red/green now means classification and nothing else; neutral means "boundary".
+    c_bound = "#6e7a88"
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.9))
+    # Shade carries each panel's own metric. |DCPA| is bounded by ||p_rel|| exactly
+    # (|d| = ||p_rel|| |sin angle|), so its classes get their true ranges, [0, R] and
+    # [R, ||p_rel||]. |TCPA| is unbounded -- it diverges at the apex, where ||v_rel|| -> 0
+    # -- so it gets a robust upper limit and clips. That asymmetry is the metrics'
+    # difference, not a plotting convenience.
+    mags = [None, None, None]
+    if pts is not None:
+        mags = [(d_s, class_limits(d_s, s_d)),
+                (np.abs(tau_s), class_limits(np.abs(tau_s), s_t)),
+                None]
+
+    panels = [
+        (m_d, c_bound, r"(a) $\mathrm{DCPA} \leq R$", held_d,
+         [rf"$\mathrm{{DCPA}} = {v:.1f}$ m" for v in d_pair]),
+        (m_t, c_bound, r"(b) $\mathrm{TCPA} > 0$", held_t,
+         [rf"$\mathrm{{TCPA}} = {v:+.1f}$ s" for v in tau_pair]),
+        (m_d & m_t, c_bound, r"(c) both $= \mathrm{VO}_{E|O}$", held_d & held_t, None),
+    ]
+    for i, (ax, (mask, color, title, held, annot)) in enumerate(zip(axes, panels)):
+        _fill_region(ax, VX, VY, mask, color, 0.22, fill=pts is None)
+        ax.set_title(title, fontsize=11.5)
+        if pts is not None:
+            mag, lim = (None, None) if mags[i] is None else mags[i]
+            _scatter_candidates(ax, pts, held_pts[i], mag, lim, mark_size)
+        _mark_equivalence(ax, target.vel, v_conflict, v_safe, held, annot,
+                          emphasize=pts is not None)
+        ax.set_xlim(c[0] - half, c[0] + half)
+        ax.set_ylim(c[1] - half, c[1] + half)
+        ax.set_aspect("equal")
+        ax.set_xlabel(r"$v_{East}$ [m/s]")
+    axes[0].set_ylabel(r"$v_{North}$ [m/s]")
+
+    # Panel (c): the tangent-line construction over the predicate region it must match.
+    # Rays from the apex, not lines -- a line would reach into the mirror lobe and undo
+    # the distinction the figure is drawing.
+    vo = VelocityObstacle.from_ships(own, target)
+    e1, e2 = vo.cone.edges
+    for e in (e1, e2):
+        tip = vo.apex + e * 4.0 * half
+        axes[2].plot([vo.apex[0], tip[0]], [vo.apex[1], tip[1]], color="#111111",
+                     lw=1.4, ls=(0, (4, 3)), zorder=5)
+    axes[2].set_xlim(c[0] - half, c[0] + half)      # the rays overshoot the frame
+    axes[2].set_ylim(c[1] - half, c[1] + half)
+
+    handles = [
+        Line2D([], [], ls="none", marker="s", color="#1f77b4", ms=7,
+               label=r"$\mathbf{v}_O$ (apex)"),
+        Line2D([], [], ls="none", marker="o", color=OUTCOME_COLORS[1], ms=8, mec="white",
+               label=r"$\mathbf{v}_E$, condition holds"),
+        Line2D([], [], ls="none", marker="o", color=OUTCOME_COLORS[0], ms=8, mec="white",
+               label=r"$\mathbf{v}_E$, condition fails"),
+        Line2D([], [], color="k", lw=1.3, ls=(0, (4, 3)), label="tangent construction"),
+    ]
+    if pts is not None:
+        handles.append(Line2D([], [], ls="none", marker=None,
+                              label="shade: darker = larger magnitude"))
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=9.5,
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout()
+    return fig
+
+
+def _scatter_candidates(ax, pts, held, mag=None, limits=None, size=3.0):
+    """Candidate velocities colored by a panel's criterion. Counts go in the caption.
+
+    With ``mag`` (a per-point magnitude) and ``limits`` (one ``(lo, hi)`` per class,
+    fail-class first) the marks additionally carry shade: each class ramps from its
+    OUTCOME_COLORS hue at ``lo`` and only darkens toward ``hi``, so the red/green
+    classification is unchanged and magnitude rides on top of it. Ramping each class over
+    its own range rather than a shared one keeps both legible -- the classes cover very
+    different spans of the metric.
+    """
+    c_safe, c_hit = OUTCOME_COLORS
+    for keep, color, cmap, lim in ((~held, c_safe, _RAMP_FAIL, None if limits is None else limits[0]),
+                                   (held, c_hit, _RAMP_HOLD, None if limits is None else limits[1])):
+        if not keep.any():
+            continue
+        # One draw path for both modes, so panels with and without shade carry the same
+        # visual weight.
+        kw = dict(c=color) if mag is None else dict(
+            c=mag[keep], cmap=cmap, norm=Normalize(*lim, clip=True))
+        ax.scatter(pts[keep, 0], pts[keep, 1], s=size, alpha=0.6, linewidths=0,
+                   zorder=3, **kw)
+
+
+def _mark_equivalence(ax, apex, v_conflict, v_safe, held, annot=None, emphasize=False):
+    """Apex and the two candidate own velocities, colored by one panel's criterion.
+
+    ``held`` is a boolean pair: does this panel's condition hold at each velocity. Red
+    means flagged by *this* criterion and green cleared by it, so a marker changes color
+    between panels -- which is the point. Both velocities are red under ``DCPA <= R``,
+    only one under ``TCPA > 0``: that is the figure's argument that neither scalar is
+    sufficient alone. The colors are ``OUTCOME_COLORS``, consistent with their meaning
+    elsewhere in the module (flagged as a conflict / cleared).
+
+    ``annot`` is a pair of strings or None. Each panel labels only the metric it is
+    about: the twin pair's DCPA agrees and its TCPA does not, so splitting the annotation
+    across panels (a) and (b) is what makes that contrast readable.
+    """
+    c_safe, c_hit = OUTCOME_COLORS
+    ax.plot(0, 0, "+", color="k", ms=9)
+    ax.plot(*apex, "s", color="#1f77b4", ms=7, zorder=6)
+    offsets = ((-9, -11), (11, 8))              # away from the frame corners
+    aligns = (("right", "top"), ("left", "bottom"))
+    ms, mec, mew = (10, "k", 1.3) if emphasize else (8, "white", 1.0)
+    for i, v in enumerate((v_conflict, v_safe)):
+        color = c_hit if held[i] else c_safe
+        ax.plot(*v, "o", color=color, ms=ms, mec=mec, mew=mew, zorder=7)
+        if annot is not None:
+            # Over a scatter, unbacked text is unreadable; the patch is invisible without.
+            bbox = dict(boxstyle="round,pad=0.18", fc="white", ec="none",
+                        alpha=0.82) if emphasize else None
+            ax.annotate(annot[i], v, textcoords="offset points", xytext=offsets[i],
+                        ha=aligns[i][0], va=aligns[i][1], fontsize=9.5, color=color,
+                        zorder=8, bbox=bbox)
+
+
+def stochastic_comparison_figure(scenarios, Sigma_pos, Sigma_vel, n=200000, seed=0,
+                                 labels=None):
+    """How the three metrics degrade under uncertainty, at *fixed* noise.
+
+    One row per encounter: the ``(TCPA, DCPA)`` joint with its marginals, and own-velocity
+    space with the sampled collision partition. Every row carries the SAME ``Sigma_pos``
+    and ``Sigma_vel``, so nothing but the encounter geometry differs between them -- the
+    catalog's ``anchored_covariances`` instead scales sigma_vel with the closing speed,
+    which pins the velocity SNR at a constant and hides the effect entirely.
+
+    Axes are per-row on purpose. TCPA dispersion varies by orders of magnitude between
+    well- and ill-conditioned encounters, so a shared linear axis collapses the
+    well-conditioned row to a line; the numbers carry the comparison, the panels carry
+    the shape.
+
+    Parameters
+    ----------
+    scenarios : sequence of Scenario
+        Encounters, one per row. Their own noise settings are ignored.
+    Sigma_pos, Sigma_vel : array_like, shape (2, 2), or UncertaintyModel
+        The single noise model applied to every row, per channel: a covariance (drawn as
+        Gaussian) or any model exposing ``sample``, e.g. a ``UniformEllipse``. Nothing
+        downstream reads the covariance once the samples are drawn, so bounded models
+        need no special handling.
+    n : int
+        Samples per encounter.
+    seed : int
+        Base seed; each row draws from its own generator.
+    labels : sequence of str, optional
+        Row titles. Defaults to the scenario names.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _apply_style()
+    labels = [sc.name.replace("_", " ") for sc in scenarios] if labels is None else labels
+
+    fig = plt.figure(figsize=(12.5, 4.6 * len(scenarios)))
+    grid = fig.subfigures(len(scenarios), 2, width_ratios=(1.15, 1.0), wspace=0.04,
+                          hspace=0.04)
+    grid = np.atleast_2d(grid)
+
+    for row, (sc, label) in enumerate(zip(scenarios, labels)):
+        own, target = sc.ships()
+        m = Metrics(own, target)
+        R = m.safety_radius
+        rng = np.random.default_rng(seed + row)
+        smp = sample_cpa(own, target, Sigma_pos, Sigma_vel, n=n, rng=rng)
+
+        det = (m.TCPA() > 0) and (abs(m.DCPA()) <= R)
+        _plot_cpa_joint(grid[row, 0], own, target, Sigma_pos, Sigma_vel, n, R, None, rng,
+                        samples=smp,
+                        title=rf"{label}   |   nominal $\mathrm{{TCPA}}={m.TCPA():.0f}$ s, "
+                              rf"$\mathrm{{DCPA}}={abs(m.DCPA()):.0f}$ m "
+                              rf"({'in VO' if det else 'safe'})")
+
+        ax = grid[row, 1].subplots()
+        _, p_hit = _plot_vo_outcome(ax, own, target, smp, R)
+        # No legend here: the joint panel beside it already keys the same two colors,
+        # and a second copy sits on top of the cloud.
+        ax.set_title(rf"own-velocity space   |   $P[\mathrm{{collision}}]={p_hit:.3f}$",
+                     fontsize=11.5)
     return fig
 
 
