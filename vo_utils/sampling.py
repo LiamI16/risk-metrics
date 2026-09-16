@@ -4,6 +4,8 @@ from typing import NamedTuple
 
 import numpy as np
 
+from .metrics import cpa_fields
+
 
 class CpaSamples(NamedTuple):
     """One encounter's sampled closest-approach metrics, with the draws behind them."""
@@ -158,15 +160,5 @@ def sample_cpa(own, target, Sigma_pos=None, Sigma_vel=None, n=10000, rng=None):
     r = _draw(Sigma_pos, r_hat, n, rng)                             # (n,2)
     v = _draw(Sigma_vel, v_hat, n, rng)                             # (n,2)
 
-    speed_sq = np.einsum("ij,ij->i", v, v)                           # ||v||^2
-    moving = speed_sq > 1e-12
-
-    tcpa = np.zeros(n)                                               # 0 where no relative motion
-    np.divide(-np.einsum("ij,ij->i", r, v), speed_sq, out=tcpa, where=moving)
-
-    cross = v[:, 0] * r[:, 1] - v[:, 1] * r[:, 0]                    # v x r (signed)
-    speed = np.where(moving, np.sqrt(speed_sq), 1.0)                 # avoid 0/0 at static draws
-    dcpa = np.where(moving, cross / speed,                           # signed miss distance
-                    np.linalg.norm(r, axis=1))                       # -> ||r|| (unsigned) when static
-
+    tcpa, dcpa = cpa_fields(r, v)
     return CpaSamples(dcpa, tcpa, r, v)

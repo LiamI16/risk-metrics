@@ -7,6 +7,46 @@ from .ship import Ship
 from .obstacle import VelocityObstacle
 
 
+def cpa_fields(relpos, relvel):
+    """Vectorized TCPA and *signed* DCPA -- the array counterpart of :class:`Metrics`.
+
+    ``relpos`` and ``relvel`` need only broadcast against each other to (..., 2), so this
+    serves a cloud of realizations, a grid of candidate velocities, or one pair.
+
+    Returns
+    -------
+    tcpa, dcpa_s : ndarray
+        Degenerate ``relvel = 0`` takes the zero-speed branch of the definitions:
+        ``TCPA = 0`` and ``DCPA = ||relpos||``.
+    """
+    speed_sq = np.einsum("...i,...i->...", relvel, relvel)
+    moving = speed_sq > 1e-15
+    safe = np.where(moving, speed_sq, 1.0)
+    tcpa = np.where(moving, -np.einsum("...i,...i->...", relpos, relvel) / safe, 0.0)
+    cross = relvel[..., 0] * relpos[..., 1] - relvel[..., 1] * relpos[..., 0]
+    dcpa_s = np.where(moving, cross / np.sqrt(safe), np.linalg.norm(relpos, axis=-1))
+    return tcpa, dcpa_s
+
+
+def collides(relpos, relvel, R):
+    """Is there a ``t >= 0`` with ``||relpos + relvel t|| <= R``? Vectorized, exact.
+
+    Solves the quadratic ``a t^2 + b t + c <= 0`` directly rather than going through
+    TCPA/DCPA, so anything comparing this against the CPA characterization of Theorem 1
+    is testing that theorem rather than assuming it. Since ``a = ||relvel||^2 >= 0`` the
+    parabola dips below zero exactly between its roots, so a non-negative solution exists
+    iff the roots are real and the larger one is non-negative. Degenerate ``relvel = 0``
+    reduces to ``||relpos|| <= R``.
+    """
+    a = np.einsum("...i,...i->...", relvel, relvel)
+    b = 2.0 * np.einsum("...i,...i->...", relpos, relvel)
+    c = np.einsum("...i,...i->...", relpos, relpos) - R ** 2
+    moving = a > 1e-15
+    disc = b ** 2 - 4.0 * a * c
+    t_hi = (-b + np.sqrt(np.maximum(disc, 0.0))) / (2.0 * np.where(moving, a, 1.0))
+    return np.where(moving, (disc >= 0.0) & (t_hi >= 0.0), c <= 0.0)
+
+
 class Metrics:
     def __init__(self, ownship, targetship):
         """
