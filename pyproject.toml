@@ -5,19 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "risk-metrics"
 version = "0.1.0"
-description = "Convex Minkowski-sum geometry and velocity obstacles under uncertainty"
-requires-python = ">=3.10"
+description = "CPA metrics and velocity obstacles for convex agents under position and velocity uncertainty"
+readme = "README.md"
+requires-python = ">=3.12"
 authors = [{ name = "Liam Imagawa", email = "liamimagawa@gmail.com" }]
-dependencies = [
-    "numpy",
-    "scipy",
-]
+dependencies = ["numpy", "scipy"]
 
-# matplotlib is only needed for the plotting modules; the compute core
-# (minkowski_utils.shapes/minkowski, vo_utils.cone/obstacle/uncertainty) is
-# numpy/scipy only.  Install with:  pip install -e ".[plot]"
 [project.optional-dependencies]
 plot = ["matplotlib"]
+test = ["pytest"]
 
 [tool.setuptools.packages.find]
-include = ["minkowski_utils*", "vo_utils*"]
+include = ["risk_metrics*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+# numpy's multivariate_normal emits spurious matmul RuntimeWarnings on macOS Accelerate builds.
+filterwarnings = ["ignore:.*encountered in matmul:RuntimeWarning"]
