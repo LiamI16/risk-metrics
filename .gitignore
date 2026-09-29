@@ -1,28 +1,15 @@
-/__pycache__
-/.pytest_cache
-.venv
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
 .DS_Store
-
-/artifacts
-
-/minkowski_utils/NOTES.md
-/minkowski_utils/__pycache__
-/minkowski_utils/tests
-
-/vo_utils/__pycache__
-/vo_utils/tests
-
-# scripts/ stays out of the module, except the figures that ship with the paper.
-# Must be /scripts/* not /scripts: git does not descend into an excluded
-# directory, so a negation inside one never gets a chance to match -- which is
-# also why paper_tex/ needs the directory itself un-excluded, not just its files.
-/scripts/*
-!/scripts/scenario_grid.py
-!/scripts/paper_figures.py
-!/scripts/paper_tex/
-!/scripts/paper_tex/**
-
-# packaging (editable install / build)
 *.egg-info/
 build/
 dist/
+
+# Generated figures and data
+/output/
+
+# Local files
+/artifacts/
+/scripts/
