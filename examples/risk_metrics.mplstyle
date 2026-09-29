@@ -1,0 +1,9 @@
+font.family: serif
+font.size: 11
+axes.grid: True
+axes.axisbelow: True
+grid.alpha: 0.3
+grid.linestyle: --
+figure.dpi: 150
+savefig.dpi: figure
+savefig.bbox: tight
